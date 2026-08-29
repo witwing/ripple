@@ -1,9 +1,17 @@
 """Embedding：懒加载 bge-small-zh + Chroma persistent client。
 
 第一次调用时才加载模型，避免 CLI 冷启动过慢；模型未装时降级为纯关键词检索。
+
+模型来源顺序（v1）：
+  1. 本地缓存已存在 → 直接从该路径加载
+  2. RIPPLE_EMBED_MODEL_PATH 环境变量指定的路径
+  3. 尝试 modelscope 拉 `AI-ModelScope/<model-basename>`（国内可达）
+  4. 直接扔给 sentence-transformers（会走 HuggingFace Hub，可能失败）
 """
 from __future__ import annotations
 
+import os
+from pathlib import Path
 from typing import Iterable
 
 from ripple.core import paths
@@ -21,6 +29,39 @@ _warned_missing = False
 COLLECTION_NAME = "notes"
 
 
+def _resolve_model_path(model_name: str) -> str:
+    """把 HF 风格 model id 解析成本地路径；不可解析时原样返回让 st 自己处理。"""
+    # 环境变量优先
+    env_path = os.environ.get("RIPPLE_EMBED_MODEL_PATH")
+    if env_path and Path(env_path).exists():
+        return env_path
+
+    basename = model_name.split("/")[-1]  # bge-small-zh-v1.5
+
+    # ModelScope 缓存约定路径
+    ms_root = Path(os.environ.get(
+        "MODELSCOPE_CACHE", os.path.expanduser("~/.cache/modelscope")
+    )) / "models" / f"AI-ModelScope--{basename}" / "snapshots"
+    if ms_root.exists():
+        # 取任一子目录（一般叫 master 或 hash）
+        for sub in ms_root.iterdir():
+            if sub.is_dir():
+                return str(sub)
+
+    # 尝试用 modelscope 下载
+    try:
+        from modelscope import snapshot_download
+        log.info(f"从 ModelScope 下载 embedding 模型（首次约 100MB）：{basename}")
+        path = snapshot_download(f"AI-ModelScope/{basename}")
+        return path
+    except ImportError:
+        pass
+    except Exception as e:
+        log.warning(f"ModelScope 下载失败：{e}；改由 sentence-transformers 尝试 HuggingFace")
+
+    return model_name
+
+
 def _get_model(cfg: Config):
     global _model, _warned_missing
     if _model is not None:
@@ -33,8 +74,15 @@ def _get_model(cfg: Config):
             log.warning("sentence-transformers 未安装，向量检索关闭；混合检索退化为关键词过滤")
             _warned_missing = True
         return None
-    log.info(f"加载 embedding 模型：{model_name}（首次会下载权重，耐心等）")
-    _model = SentenceTransformer(model_name)
+    resolved = _resolve_model_path(model_name)
+    log.info(f"加载 embedding 模型：{resolved}")
+    try:
+        _model = SentenceTransformer(resolved)
+    except Exception as e:
+        if not _warned_missing:
+            log.warning(f"embedding 模型加载失败（{e}）；向量检索关闭，退化到关键词过滤")
+            _warned_missing = True
+        return None
     return _model
 
 
