@@ -40,8 +40,8 @@ class AkshareProvider:
     def health(self) -> HealthStatus:
         t0 = perf_counter()
         try:
-            # 取一次上证指数即时行情做连通性检查（akshare 的 stock_zh_index_spot 一般较稳）
-            df = self._ak.stock_zh_index_spot_em(symbol="上证系列指数")
+            # 用 sina 的指数日线做连通性检查（走 finance.sina.com.cn，比 push2.eastmoney 稳）
+            df = self._ak.stock_zh_index_daily(symbol="sh000001")
             ok = df is not None and not df.empty
             msg = "OK" if ok else "空返回"
         except Exception as e:  # noqa: BLE001
@@ -53,32 +53,49 @@ class AkshareProvider:
     # ---- meta ----
     @cached("profile", ttl_hours=240)
     def profile(self, code: str) -> TickerProfile:
+        """从 sina 快照 + stock_value_em 组合出 profile。
+        push2.eastmoney.com 常被反爬，所以避开走 eastmoney 的接口。
+        """
         sym = Symbol.parse(code)
-        # akshare 有多个"个股信息"接口，`stock_individual_info_em` 相对稳定
+        name = sym.code
+        total_mv: float | None = None
+        float_mv: float | None = None
+
+        # 名字：sina 快照第一列就是股票简称
         try:
-            info = self._ak.stock_individual_info_em(symbol=sym.code)
-        except Exception as e:
-            raise RuntimeError(f"akshare 拉取 {sym.code} 元信息失败：{e}") from e
+            import requests
+            r = requests.get(
+                f"https://hq.sinajs.cn/list={sym.to_akshare()}",
+                headers={"Referer": "https://finance.sina.com.cn", "User-Agent": "Mozilla/5.0"},
+                timeout=8,
+            )
+            r.encoding = "gbk"
+            text = r.text
+            if "=" in text and '"' in text:
+                payload = text.split('"')[1]
+                fields = payload.split(",")
+                if fields and fields[0]:
+                    name = fields[0]
+        except Exception:
+            pass
 
-        kv: dict[str, str] = {}
-        if info is not None and not info.empty:
-            for _, row in info.iterrows():
-                kv[str(row.iloc[0])] = str(row.iloc[1])
-
-        # 字段在不同 akshare 版本略有差异，兼容几种命名
-        name = kv.get("股票简称") or kv.get("名称") or kv.get("股票名称") or sym.code
-        industry = kv.get("行业") or kv.get("所处行业")
-        list_date = _normalize_date(kv.get("上市时间") or kv.get("上市日期"))
-        total_mv = _to_float(kv.get("总市值"))
-        float_mv = _to_float(kv.get("流通市值"))
+        # 市值：stock_value_em 最近一行
+        try:
+            df = self._ak.stock_value_em(symbol=sym.code)
+            if df is not None and not df.empty:
+                last = df.iloc[-1]
+                total_mv = _to_float(last.get("总市值"))
+                float_mv = _to_float(last.get("流通市值"))
+        except Exception:
+            pass
 
         return TickerProfile(
             code=sym.code,
             name=name,
             exchange=sym.exchange,
             board=sym.board,
-            industry=industry,
-            list_date=list_date,
+            industry=None,  # sina 快照不含行业；后续如需要走另一接口补
+            list_date=None,
             total_mv=total_mv,
             float_mv=float_mv,
         )
@@ -86,57 +103,60 @@ class AkshareProvider:
     # ---- quote ----
     @cached("snapshot", ttl_hours=0.1)
     def snapshot(self, code: str) -> Quote:
+        """走 sina 快照（hq.sinajs.cn），避开被反爬的 stock_zh_a_spot_em。"""
         sym = Symbol.parse(code)
         try:
-            df = self._ak.stock_zh_a_spot_em()  # 全市场快照，一次调用
+            import requests
+            r = requests.get(
+                f"https://hq.sinajs.cn/list={sym.to_akshare()}",
+                headers={"Referer": "https://finance.sina.com.cn", "User-Agent": "Mozilla/5.0"},
+                timeout=8,
+            )
+            r.encoding = "gbk"
         except Exception as e:
-            raise RuntimeError(f"akshare 拉即时行情失败：{e}") from e
-        if df is None or df.empty:
-            raise RuntimeError("akshare 即时行情为空")
-        row = df.loc[df["代码"] == sym.code]
-        if row.empty:
-            raise RuntimeError(f"未在 A 股即时行情中找到 {sym.code}")
-        r = row.iloc[0]
+            raise RuntimeError(f"sina 快照请求失败：{e}") from e
+
+        # 格式：var hq_str_sh600519="名称,今开,昨收,现价,最高,最低,买1,卖1,成交量,成交额,...,日期,时间,00,...";
+        if '"' not in r.text:
+            raise RuntimeError(f"sina 快照返回异常：{r.text[:100]}")
+        payload = r.text.split('"')[1]
+        f = payload.split(",")
+        if len(f) < 10:
+            raise RuntimeError(f"sina 快照字段不足：{payload[:100]}")
+
         return Quote(
             code=sym.code,
             ts=datetime.utcnow(),
-            price=_to_float(r.get("最新价")) or 0.0,
-            open=_to_float(r.get("今开")),
-            high=_to_float(r.get("最高")),
-            low=_to_float(r.get("最低")),
-            prev_close=_to_float(r.get("昨收")),
-            volume=_to_float(r.get("成交量")),
-            amount=_to_float(r.get("成交额")),
+            price=_to_float(f[3]) or 0.0,
+            open=_to_float(f[1]),
+            high=_to_float(f[4]),
+            low=_to_float(f[5]),
+            prev_close=_to_float(f[2]),
+            volume=_to_float(f[8]),
+            amount=_to_float(f[9]),
         )
 
     @cached("daily_kline", ttl_hours=12)
     def daily_kline(self, code: str, start: date, end: date) -> pd.DataFrame:
+        """走 sina 日线 stock_zh_a_daily，避开被反爬的 stock_zh_a_hist。"""
         sym = Symbol.parse(code)
         try:
-            df = self._ak.stock_zh_a_hist(
-                symbol=sym.code,
-                period="daily",
+            df = self._ak.stock_zh_a_daily(
+                symbol=sym.to_akshare(),
+                adjust="qfq",
                 start_date=start.strftime("%Y%m%d"),
                 end_date=end.strftime("%Y%m%d"),
-                adjust="qfq",
             )
         except Exception as e:
-            raise RuntimeError(f"akshare 拉 K 线失败：{e}") from e
+            raise RuntimeError(f"sina 拉 K 线失败：{e}") from e
         if df is None or df.empty:
             return empty_kline()
 
-        # akshare 中文列 → Ripple 英文列
-        col_map = {
-            "日期": "date",
-            "开盘": "open",
-            "最高": "high",
-            "最低": "low",
-            "收盘": "close",
-            "成交量": "volume",
-            "成交额": "amount",
-            "换手率": "turnover_pct",
-        }
-        df = df.rename(columns=col_map)
+        # sina 列：date/open/high/low/close/volume/amount/outstanding_share/turnover
+        # 已经是英文了，只需补 turnover_pct 别名
+        if "turnover" in df.columns and "turnover_pct" not in df.columns:
+            df = df.copy()
+            df["turnover_pct"] = df["turnover"] * 100  # sina 返回是比例
         return normalize_kline(df, source=self.name)
 
     # ---- fundamental ----
@@ -173,19 +193,21 @@ class AkshareProvider:
 
     @cached("valuation", ttl_hours=12)
     def valuation(self, code: str) -> Valuation:
+        """走 stock_value_em（返回历史 PE_TTM / PB / 市销率等，最新一行 + 5Y 分位）。"""
         sym = Symbol.parse(code)
-        # 用个股指标 stock_a_indicator_lg，返回历史 PE/PB/DV，我们取最新一行 + 计算 5 年分位
         try:
-            df = self._ak.stock_a_indicator_lg(symbol=sym.code)
+            df = self._ak.stock_value_em(symbol=sym.code)
         except Exception as e:
             raise RuntimeError(f"akshare 拉估值失败：{e}") from e
         if df is None or df.empty:
             return Valuation(code=sym.code, ts=datetime.utcnow())
 
-        # 兼容列名：trade_date / date / 日期
-        date_col = _first_present(df.columns, ["trade_date", "date", "日期"])
-        pe_col = _first_present(df.columns, ["pe", "pe_ttm", "市盈率", "市盈率-TTM"])
-        pb_col = _first_present(df.columns, ["pb", "市净率"])
+        date_col = "数据日期" if "数据日期" in df.columns else _first_present(
+            df.columns, ["trade_date", "date", "日期"]
+        )
+        pe_col = _first_present(df.columns, ["PE(TTM)", "pe_ttm", "PE", "市盈率-TTM", "市盈率"])
+        pb_col = _first_present(df.columns, ["市净率", "pb", "PB"])
+        # stock_value_em 没有股息率，交给 sina 快照或后续接口
         dv_col = _first_present(df.columns, ["dv_ratio", "股息率"])
 
         if date_col:
@@ -193,9 +215,9 @@ class AkshareProvider:
         latest = df.iloc[-1]
 
         # 5 年分位
-        five_years_ago = datetime.now() - timedelta(days=365 * 5)
         recent = df
         if date_col:
+            five_years_ago = datetime.now() - timedelta(days=365 * 5)
             try:
                 recent = df[pd.to_datetime(df[date_col]) >= pd.Timestamp(five_years_ago)]
             except Exception:

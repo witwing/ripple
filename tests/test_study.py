@@ -48,9 +48,9 @@ class FakeAll:
 
     def financial_reports(self, code: str, kind: str, periods: int = 8) -> pd.DataFrame:
         return pd.DataFrame({
-            "项目": ["营业总收入", "归属于母公司股东的净利润"],
-            "2026-06-30": ["1200", "300"],
-            "2025-06-30": ["1000", "250"],
+            "报告日": ["20260630", "20260331", "20251231", "20250930", "20250630"],
+            "营业总收入": [1200, 600, 1000, 800, 600],
+            "归属于母公司所有者的净利润": [300, 150, 250, 200, 150],
         })
 
     def announcements(self, code: str, since: date):

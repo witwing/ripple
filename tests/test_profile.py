@@ -47,15 +47,13 @@ def test_profile_valuation_passthrough():
 
 
 def test_profile_income_yoy():
-    # 模拟 sina 宽表：项目 | 最近期 | 上一期 | ... | 4 期前（=去年同期）
+    # 模拟 sina 宽表结构：行=报告期，列=项目
     df = pd.DataFrame({
-        "项目": ["营业总收入", "归属于母公司股东的净利润"],
-        "2026-06-30": ["1200", "300"],
-        "2026-03-31": ["600", "150"],
-        "2025-12-31": ["1000", "250"],
-        "2025-09-30": ["800", "200"],
+        "报告日": ["20260630", "20260331", "20251231", "20250930", "20250630"],
+        "营业总收入": [1200, 600, 1000, 800, 600],
+        "归属于母公司所有者的净利润": [300, 150, 250, 200, 150],
     })
     p = build_profile("600519", None, quote=None, kline=None, valuation=None, income=df)
-    # 最近期 1200 vs 下一个可用 600 → +100%（本测试仅验证解析逻辑跑通）
-    assert p.revenue_yoy_pct is not None
-    assert p.net_profit_yoy_pct is not None
+    # 最近期 1200 vs 4 期前 600 → +100%
+    assert p.revenue_yoy_pct == 100.0
+    assert p.net_profit_yoy_pct == 100.0

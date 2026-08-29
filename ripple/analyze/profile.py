@@ -84,37 +84,43 @@ def _kline_range_pct(kline: pd.DataFrame, tail: int = 20) -> float | None:
 
 
 def _yoy_from_income(df: pd.DataFrame, needle_candidates: list[str]) -> float | None:
-    """在利润表 DataFrame 里找一行匹配 needle 的项目，取最近两期算同比。
+    """在利润表 DataFrame 里算某一项的最近同比。
 
-    sina 返回的通常是"项目 + 多个报告期列"的宽表。
+    sina stock_financial_report_sina 的结构：
+      · 每行是一个报告期（首列 '报告日' 形如 20260630）
+      · 每列是一个财务项目（如 '营业总收入'）
+    我们取最近一期与去年同期（4 期前）之差。
     """
     if df is None or df.empty:
         return None
-    first_col = df.columns[0]
+    date_col = "报告日" if "报告日" in df.columns else df.columns[0]
+    # 找匹配的列
+    col_name = None
     for needle in needle_candidates:
-        matches = df[df[first_col].astype(str).str.contains(needle, na=False)]
-        if matches.empty:
-            continue
-        row = matches.iloc[0]
-        # 报告期列（除首列外）
-        period_cols = [c for c in df.columns[1:]]
-        if len(period_cols) < 2:
-            return None
-        # 假定第一个报告期为最近期（sina 一般降序）
-        try:
-            cur = float(str(row[period_cols[0]]).replace(",", ""))
-            prev_year = None
-            # 找 4 个季度前作为同比基准
-            for c in period_cols[1:]:
-                try:
-                    prev_year = float(str(row[c]).replace(",", ""))
-                    break
-                except (TypeError, ValueError):
-                    continue
-        except (TypeError, ValueError):
-            return None
-        return _pct_change(cur, prev_year)
-    return None
+        for c in df.columns:
+            if needle in str(c):
+                col_name = c
+                break
+        if col_name:
+            break
+    if not col_name:
+        return None
+
+    # 按报告日降序
+    try:
+        sorted_df = df.sort_values(date_col, ascending=False).reset_index(drop=True)
+    except Exception:
+        sorted_df = df
+
+    if len(sorted_df) < 5:
+        return None
+
+    try:
+        cur = float(str(sorted_df.iloc[0][col_name]).replace(",", ""))
+        prev_year = float(str(sorted_df.iloc[4][col_name]).replace(",", ""))  # 4 期前 = 去年同期
+    except (TypeError, ValueError):
+        return None
+    return _pct_change(cur, prev_year)
 
 
 def build_profile(
