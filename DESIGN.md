@@ -15,6 +15,7 @@
 | v0.1 | 2026-08-29 | 初版：定位、架构分层、目录、数据模型、CLI 动词、Milestone |
 | v0.2 | 2026-08-29 | 数据源抽象化（可插拔）；向量模型固定本地；补充数据源适配层设计 |
 | v0.3 | 2026-08-29 | 自我 review 后修订：Note 组织方式、返回结构规范、Symbol 抽象、chunk 策略、依赖清单等（详见 REVIEW.md 与本次修订处的 v0.3 注） |
+| v0.4 | 2026-08-29 | M2 落地前的补充：`study` 完整流程细化、Brief markdown schema、Advice 结构、LLM 适配层契约、`--no-llm` dry-run 语义 |
 
 ---
 
@@ -327,17 +328,101 @@ ripple cache clear [--provider akshare]
 
 ## 8. `ripple study <code>` 完整流程（M2 起）
 
+### 8.1 步骤
+
 ```
 1. Fetch     ─ 通过 Provider 拉：K线 / 财报 / 估值 / 公告 / 新闻
-              （命中缓存则跳过；多源可做 cross_check）
-2. Snapshot  ─ 落 SQLite snapshot 表 + 文件缓存
-3. Recall    ─ 从 notes/ 用向量+关键词混合检索出 top-k 相关笔记
-4. Profile   ─ 计算基本面画像（ROE / 现金流 / 分红 / 估值分位）
-5. Narrate   ─ Claude Sonnet 5 生成研究简报（引用 note 和数据源）
-              → briefs/600519_20260829.md
-6. Advise    ─ 综合出 Advice：action / size / confidence / rationale
-              → 写入 advice 表，输出到终端
+              （命中缓存则跳过；--refresh 强制绕过缓存）
+2. Snapshot  ─ 落 SQLite snapshot 表（每类一条），带 source + fetched_at
+3. Recall    ─ 从 notes/ 用向量+关键词混合检索出 top-K 相关笔记
+              （query 由 ticker 名 + 行业 + 常见标签拼装）
+4. Profile   ─ 纯 Python 计算基本面画像（无 LLM），返回结构化 dict：
+                · price_change_1m / 3m / 1y
+                · pe_ttm / pb / dv_ratio / pe_pct_5y
+                · roe_ttm / gross_margin_ttm / net_margin_ttm
+                · fcf_ttm / debt_ratio
+                · 近 4 季营收/净利/增速
+                · 数据缺失字段为 None，不猜
+5. Narrate   ─ LLM 生成研究简报（Sonnet 5）：
+                · 输入 = profile + recall notes 摘要 + 最近公告标题 + 新闻标题
+                · 输出 = Markdown（结构见 §8.3）
+                · --no-llm 时用 fallback：把上下文按模板直接渲染出来（不调用 API）
+              → briefs/YYYYMMDD/<code>_<HHMMSS>.md
+6. Advise    ─ 从简报里抽出结构化 Advice（JSON 段），持久化到 advice 表
 ```
+
+### 8.2 输入到 LLM 的上下文（M2 定型）
+
+```
+{
+  "ticker": {"code": "600519", "name": "贵州茅台", "industry": "白酒"},
+  "profile": { ... §8.1 里的字段 ... },
+  "recent_kline_summary": "近 20 日振幅 3.2%，近 3 个月 +8.4%",
+  "announcements": [{"date":"2026-08-15","title":"..."}] (最多 10),
+  "news":         [{"date":"2026-08-20","title":"..."}] (最多 10),
+  "recalled_notes": [
+    {"id":"note_...", "created":"2026-06-01", "excerpt":"..." , "score": 0.31}
+  ]  (最多 8),
+  "user_stance": "由 recalled notes 汇总的用户历史观点，1-2 句"
+}
+```
+
+### 8.3 Brief Markdown Schema
+
+生成的简报文件必须能被机器再解析（M4 复盘会用到）：
+
+```markdown
+---
+id: brief_YYYYMMDD_HHMMSS_<6位>
+ticker: 600519
+name: 贵州茅台
+created: 2026-08-29T15:00:00+08:00
+model: claude-sonnet-5
+llm_mode: live | dry-run
+cited_note_ids: [note_..., note_...]
+data_sources:
+  - {provider: akshare, kind: quote,       fetched_at: 2026-08-29T14:55:00+08:00}
+  - {provider: akshare, kind: fundamental, fetched_at: 2026-08-29T14:55:00+08:00}
+---
+
+# 贵州茅台 (600519) 研究简报
+
+## 一、事实速览
+（价格 / 估值 / 财务快照，机器渲染，无观点）
+
+## 二、近期动态
+（公告 + 新闻的要点整理）
+
+## 三、我的历史观点
+（从 recalled notes 汇总）
+
+## 四、判断
+（LLM 综合推理）
+
+## 五、结论
+
+```json
+{
+  "action": "watch|buy|hold|sell",
+  "size_pct": 0-100,
+  "confidence": 0.0-1.0,
+  "horizon_days": 30,
+  "rationale": "一句话"
+}
+```
+```
+
+`## 五、结论` 后紧跟一个 fenced ```json 代码块，作为 Advice 的机器可读源。
+解析失败时降级：action=watch, confidence=0.0, rationale="LLM 未产出结构化结论"。
+
+### 8.4 dry-run（`--no-llm`）
+
+不调用任何 LLM API 也能跑完全流程：
+- 前 5 步全部真跑（拉数据 / 落库 / 检索 / 计算 profile）
+- 第 5 步 Narrate 用**模板渲染** context，写出可读的 Markdown，`llm_mode: dry-run`
+- 第 6 步 Advise 固定给 `action=watch, confidence=0.0, rationale="dry-run"`
+
+价值：没有 ANTHROPIC_API_KEY 也能验证整条链路；CI 与本地开发默认走这条。
 
 ---
 
@@ -352,6 +437,33 @@ ripple cache clear [--provider akshare]
 | 复盘总结 | Claude Sonnet 5 | 需要跨文档推理 |
 
 所有 prompt 集中在 `ripple/llm/prompts/*.md`，独立于代码。
+
+### 9.1 LLM 适配层契约（M2 定型）
+
+```python
+# ripple/llm/client.py
+class LLMClient(Protocol):
+    def complete(system: str, user: str, model: str | None = None,
+                 max_tokens: int = 4096) -> str: ...
+
+def get_client(cfg: Config) -> LLMClient: ...    # 按 config + env 选实现
+```
+
+具体实现：
+- `AnthropicClient`：走 `anthropic` SDK；`ANTHROPIC_API_KEY` 必需；模型 id 从 config 读
+- `DryRunClient`：无 API key 或 `--no-llm` 时使用；`complete()` 直接把 user prompt 前缀 `"[DRY-RUN]\n"` 返回，让上层的模板渲染能识别并走 fallback 路径
+
+选择顺序：`--no-llm` 参数 > `RIPPLE_NO_LLM=1` 环境变量 > `ANTHROPIC_API_KEY` 是否存在。
+
+### 9.2 Prompt 组织
+
+```
+ripple/llm/prompts/
+├── briefer.md       # 生成研究简报
+└── advisor.md       # （M2 内嵌到 briefer 里，v1 不单调）
+```
+
+prompt 文件里用 `{{key}}` 占位，客户端 python 侧做替换（避免引入 jinja）。
 
 ---
 
@@ -375,8 +487,8 @@ ripple cache clear [--provider akshare]
 
 | 编号 | 目标 | 交付 |
 |---|---|---|
-| **M1** | 骨架能跑 | CLI 脚手架、config、SQLite、akshare provider（meta+quote 最小）、`watch add/list/remove`、`note new/recall/link/reindex`、`providers list/ping`、`cache clear` |
-| **M2** | 深挖闭环 | `study <code>` 从拉数据到生成 Brief + Advice，端到端 |
+| **M1** ✅ | 骨架能跑 | CLI 脚手架、config、SQLite、akshare provider（meta+quote 最小）、`watch add/list/remove`、`note new/recall/link/reindex`、`providers list/ping`、`cache clear` |
+| **M2** ⏳ | 深挖闭环 | akshare provider 补齐 fundamental/disclosure/news；`analyze` 模块；LLM 适配层（含 dry-run）；`ripple study <code>` 从拉数据到生成 Brief + Advice，端到端 |
 | **M3** | 模拟组合 | `sim buy/sell/status/report`，Advice ↔ Trade 关联 |
 | **M4** | 复盘回环 | `review week` 自动跑 + lesson note 自动入库 |
 | **M5+** | 可选增强 | 定时扫描、事件订阅、Web 只读面板、多数据源 cross_check |

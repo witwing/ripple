@@ -26,6 +26,8 @@ dependencies = [
     # 向量与检索
     "chromadb>=0.5",
     "sentence-transformers>=2.7",
+    # LLM
+    "anthropic>=0.34",
 ]
 
 [project.optional-dependencies]
