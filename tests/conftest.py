@@ -21,4 +21,9 @@ def isolate_home(tmp_path, monkeypatch):
     embed_mod._chroma = None
     embed_mod._collection = None
     embed_mod._warned_missing = False
+    # 清空 provider registry 单例
+    from ripple.providers.registry import registry
+    registry._chains.clear()
+    registry._providers.clear()
+    registry._failed.clear()
     yield tmp_path
