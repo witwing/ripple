@@ -1,0 +1,56 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ripple"
+version = "0.1.0"
+description = "Ripple · 观澜 — 一人投资研究、模拟与知识沉淀操作系统"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+authors = [{name = "witwing"}]
+keywords = ["a-share", "investment", "research", "notes", "cli"]
+
+dependencies = [
+    "typer>=0.12",
+    "rich>=13.7",
+    "SQLAlchemy>=2.0",
+    "pandas>=2.0",
+    "python-frontmatter>=1.1",
+    "pyyaml>=6.0",
+    "platformdirs>=4.0",
+    "httpx>=0.27",
+    # 数据源
+    "akshare>=1.15",
+    # 向量与检索
+    "chromadb>=0.5",
+    "sentence-transformers>=2.7",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+    "ruff>=0.5",
+    "mypy>=1.10",
+]
+
+[project.scripts]
+ripple = "ripple.cli:app"
+
+[tool.setuptools.packages.find]
+include = ["ripple*"]
+exclude = ["tests*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra -q"
