@@ -332,5 +332,53 @@ def cache_clear(
                   + (f"（{provider}）" if provider else "（全部）"))
 
 
+# ---- study ----
+@app.command("study")
+def study_cmd(
+    code: str = typer.Argument(..., help="6 位 A 股代码"),
+    refresh: bool = typer.Option(False, "--refresh", help="绕过缓存重新拉数据"),
+    no_llm: bool = typer.Option(False, "--no-llm", help="dry-run 模式，不调用 LLM"),
+):
+    """深挖单票：拉数据 → 召回笔记 → 生成 Brief + Advice。"""
+    from ripple.analyze.study import study as run_study
+    from ripple.llm import get_client, make_narrator
+
+    cfg = _bootstrap()
+    if refresh:
+        provider_cache.clear()
+
+    client = get_client(cfg, force_dry_run=no_llm)
+    narrator = None if client.name == "dry-run" else make_narrator(cfg, client)
+
+    try:
+        result = run_study(cfg, code, refresh=refresh, narrator=narrator)
+    except Exception as e:  # noqa: BLE001
+        console.print(f"[red]✗[/red] study 失败：{e}")
+        raise typer.Exit(1)
+
+    console.print()
+    console.print(f"[green]✓[/green] Brief → {result.brief_path.relative_to(paths.home())}")
+    p = result.profile
+    tp = Table(show_header=False, box=None, pad_edge=False)
+    tp.add_row("价格", f"{p.price if p.price is not None else '-'}"
+                       f"  ({p.price_change_1d_pct:+.2f}%)" if p.price_change_1d_pct is not None else "")
+    tp.add_row("走势",
+               f"1m {p.price_change_1m_pct}  3m {p.price_change_3m_pct}  1y {p.price_change_1y_pct}")
+    tp.add_row("估值",
+               f"PE_TTM {p.pe_ttm} (5Y {p.pe_pct_5y}%)  PB {p.pb} (5Y {p.pb_pct_5y}%)  DV {p.dv_ratio}%")
+    tp.add_row("财务", f"营收同比 {p.revenue_yoy_pct}%  净利同比 {p.net_profit_yoy_pct}%")
+    tp.add_row("召回", f"{len(result.context.recalled_notes)} 条笔记")
+    console.print(tp)
+
+    a = result.advice
+    console.print()
+    console.print(
+        f"[bold]结论[/bold]  action={a.action}  size={a.size_pct}%  "
+        f"conf={a.confidence:.2f}  horizon={a.horizon_days}d"
+    )
+    console.print(f"[dim]{a.rationale}[/dim]")
+    console.print(f"[dim]advice_id: {result.advice_id}[/dim]")
+
+
 if __name__ == "__main__":
     app()
