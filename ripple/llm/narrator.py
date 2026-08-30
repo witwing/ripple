@@ -42,7 +42,9 @@ def make_narrator(cfg: Config, client: LLMClient):
         if is_dry:
             return render_dryrun_brief(ctx), "dry-run"
         user = _render_prompt(system_prompt, ctx)
-        model_id = str(cfg.get("llm.briefer", "claude-sonnet-5"))
+        # 优先用 client 自身的 default_model（get_client 已经处理过 env / config 优先级）
+        model_id = getattr(getattr(client, "_settings", None), "default_model", None) \
+            or str(cfg.get("llm.briefer", "claude-sonnet-5"))
         text = client.complete(
             system="你是严谨的股票研究员，输出中文 Markdown。",
             user=user,
