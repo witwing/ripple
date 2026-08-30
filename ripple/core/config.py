@@ -18,6 +18,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "disclosure": ["akshare"],
         "news": ["akshare"],
         "meta": ["akshare"],
+        "capital": ["akshare"],
+        "institution": ["akshare"],
+        "research": ["akshare"],
     },
     "strategy": "fallback",
     "cache": {
@@ -32,6 +35,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "announcements": 6,
             "news": 1,
             "index_daily": 24,
+            "margin_snapshot": 8,
+            "shareholder_count": 240,
+            "fund_holdings": 720,
+            "research_reports": 24,
+            "research_consensus": 24,
         },
     },
     "rate_limit": {

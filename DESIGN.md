@@ -17,6 +17,7 @@
 | v0.3 | 2026-08-29 | 自我 review 后修订：Note 组织方式、返回结构规范、Symbol 抽象、chunk 策略、依赖清单等（详见 REVIEW.md 与本次修订处的 v0.3 注） |
 | v0.4 | 2026-08-29 | M2 落地前的补充：`study` 完整流程细化、Brief markdown schema、Advice 结构、LLM 适配层契约、`--no-llm` dry-run 语义 |
 | v0.5 | 2026-08-30 | 数据聚合第一批：新增 metrics/index 两个 capability；profile 从 12 字段扩到 27（补 ROE/毛利率/净利率/负债率/OCF比+相对沪深300）；同行对比表；briefer prompt 加同行段与"善用相对量"约束 |
+| v0.6 | 2026-08-30 | 数据聚合第二批：新增 capital/institution/research 三个 capability；profile 扩到 38 字段（+融资余额、股东户数环比、公募加减仓、卖方共识 EPS/PE 中位、评级分布）；BriefContext + capital_summary + consensus_summary；briefer 7 段结构 |
 
 ---
 

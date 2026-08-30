@@ -101,6 +101,70 @@ class HealthStatus:
     checked_at: datetime = field(default_factory=datetime.utcnow)
 
 
+# ---- Capital flow / margin ----
+
+@dataclass
+class MarginSnapshot:
+    """两融最新一天。"""
+    code: str
+    date: str                    # YYYYMMDD
+    margin_balance: float | None = None      # 融资余额 (元)
+    margin_buy: float | None = None          # 融资买入额
+    short_balance: float | None = None       # 融券余额
+    short_sell_volume: float | None = None   # 融券卖出量
+
+
+@dataclass
+class ShareholderSnapshot:
+    """股东户数最近一期 + 环比。"""
+    code: str
+    period: str                              # YYYY-MM-DD
+    count: int | None = None                 # 股东户数
+    count_change_pct: float | None = None    # 环比 %
+    holdings_per_account: float | None = None  # 户均持股市值 (元)
+
+
+# ---- Institution ----
+
+@dataclass
+class FundHoldingSummary:
+    """公募重仓单期汇总。"""
+    code: str
+    period: str                              # YYYYMMDD
+    fund_count: int | None = None            # 持有基金家数
+    total_shares: float | None = None        # 持股总数
+    holdings_value: float | None = None      # 持股市值 (元)
+    change_direction: str | None = None      # 加仓 / 减仓
+    change_pct: float | None = None          # 持股变动比例
+
+
+# ---- Research ----
+
+@dataclass
+class ResearchReport:
+    code: str
+    title: str
+    org: str
+    rating: str | None = None                # 买入 / 增持 / 中性 / 减持
+    date: str | None = None                  # YYYY-MM-DD
+    eps_next_year: float | None = None       # 明年 EPS 预测
+    pe_next_year: float | None = None
+    eps_2y: float | None = None              # 后年
+    pe_2y: float | None = None
+
+
+@dataclass
+class ResearchConsensus:
+    """卖方一致预期：把 N 份研报的 EPS 预测聚合。"""
+    code: str
+    report_count: int = 0                    # 覆盖研报数
+    ratings: dict[str, int] = field(default_factory=dict)  # {"买入": 5, "增持": 2, ...}
+    eps_next_year_median: float | None = None
+    eps_next_year_min: float | None = None
+    eps_next_year_max: float | None = None
+    pe_next_year_median: float | None = None
+
+
 # ---- Capability Protocols ----
 
 @runtime_checkable
@@ -151,6 +215,26 @@ class NewsProvider(BaseProvider, Protocol):
     def news(self, code: str, since: date, limit: int = 50) -> list[NewsItem]: ...
 
 
+@runtime_checkable
+class CapitalFlowProvider(BaseProvider, Protocol):
+    """资金面：融资融券 + 股东户数（散户/机构筹码变化）。"""
+    def margin_snapshot(self, code: str) -> MarginSnapshot | None: ...
+    def shareholder_count(self, code: str) -> ShareholderSnapshot | None: ...
+
+
+@runtime_checkable
+class InstitutionProvider(BaseProvider, Protocol):
+    """机构持仓：公募基金重仓。"""
+    def fund_holdings(self, code: str) -> FundHoldingSummary | None: ...
+
+
+@runtime_checkable
+class ResearchProvider(BaseProvider, Protocol):
+    """卖方研报 + 一致预期。"""
+    def research_reports(self, code: str, limit: int = 20) -> list[ResearchReport]: ...
+    def consensus(self, code: str) -> ResearchConsensus: ...
+
+
 # 能力名 → Protocol，方便按字符串取
 CAPABILITIES: dict[str, type] = {
     "meta": MetaProvider,
@@ -160,6 +244,9 @@ CAPABILITIES: dict[str, type] = {
     "index": IndexProvider,
     "disclosure": DisclosureProvider,
     "news": NewsProvider,
+    "capital": CapitalFlowProvider,
+    "institution": InstitutionProvider,
+    "research": ResearchProvider,
 }
 
 

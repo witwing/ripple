@@ -15,9 +15,14 @@ from ripple.core.symbol import Symbol
 from ripple.providers.base import (
     Announcement,
     FinancialMetrics,
+    FundHoldingSummary,
     HealthStatus,
+    MarginSnapshot,
     NewsItem,
     Quote,
+    ResearchConsensus,
+    ResearchReport,
+    ShareholderSnapshot,
     TickerProfile,
     Valuation,
     empty_kline,
@@ -424,6 +429,229 @@ class AkshareProvider:
             mask = (df["date"] >= pd.Timestamp(start)) & (df["date"] <= pd.Timestamp(end))
             df = df[mask].reset_index(drop=True)
         return df
+
+    # ---- capital: 融资融券 + 股东户数 ----
+    @cached("margin_snapshot", ttl_hours=8)
+    def margin_snapshot(self, code: str) -> MarginSnapshot | None:
+        """两融最新一天。SSE 走 stock_margin_detail_sse，SZSE 走 detail_szse。
+        近期日期若无数据（非交易日/未披露）向前回退最多 5 天。
+        """
+        sym = Symbol.parse(code)
+        # 交易所决定接口
+        if sym.exchange == "SH":
+            fn = self._ak.stock_margin_detail_sse
+            code_col = "标的证券代码"
+        elif sym.exchange == "SZ":
+            fn = self._ak.stock_margin_detail_szse
+            code_col = "证券代码"
+        else:
+            return None  # 北交所暂不支持
+
+        today = datetime.now().date()
+        for i in range(6):  # 回退最多 5 个交易日
+            d = today - timedelta(days=i)
+            try:
+                df = fn(date=d.strftime("%Y%m%d"))
+            except Exception:
+                continue
+            if df is None or df.empty:
+                continue
+            hit = df[df[code_col] == sym.code]
+            if hit.empty:
+                continue
+            row = hit.iloc[0]
+            return MarginSnapshot(
+                code=sym.code,
+                date=d.strftime("%Y%m%d"),
+                margin_balance=_to_float(row.get("融资余额")),
+                margin_buy=_to_float(row.get("融资买入额")),
+                short_balance=_to_float(row.get("融券余额")),
+                short_sell_volume=_to_float(row.get("融券卖出量")),
+            )
+        return None
+
+    @cached("shareholder_count", ttl_hours=240)
+    def shareholder_count(self, code: str) -> ShareholderSnapshot | None:
+        """股东户数最近一期 + 环比。"""
+        sym = Symbol.parse(code)
+        try:
+            df = self._ak.stock_zh_a_gdhs_detail_em(symbol=sym.code)
+        except Exception:
+            return None
+        if df is None or df.empty:
+            return None
+        # 按截止日排序取最近
+        try:
+            df = df.sort_values("股东户数统计截止日")
+        except Exception:
+            pass
+        latest = df.iloc[-1]
+        period = latest.get("股东户数统计截止日")
+        if hasattr(period, "strftime"):
+            period_str = period.strftime("%Y-%m-%d")
+        else:
+            period_str = str(period)
+        return ShareholderSnapshot(
+            code=sym.code,
+            period=period_str,
+            count=int(latest.get("股东户数-本次")) if pd.notna(latest.get("股东户数-本次")) else None,
+            count_change_pct=_to_float(latest.get("股东户数-增减比例")),
+            holdings_per_account=_to_float(latest.get("户均持股市值")),
+        )
+
+    # ---- institution: 公募重仓 ----
+    @cached("fund_holdings", ttl_hours=720)
+    def fund_holdings(self, code: str) -> FundHoldingSummary | None:
+        """公募基金对该股的最新一期重仓汇总。走 stock_report_fund_hold 全表按 code 过滤。
+
+        stock_report_fund_hold 是**全 A 单期**表（5000+ 行），我们只取本 code 那一行。
+        date 参数取"近期已公布报告期"：Q1(0331)/H1(0630)/Q3(0930)/Y(1231)，
+        由 akshare 内部数据决定；我们回退最多 4 个季度找有数据的那期。
+        """
+        sym = Symbol.parse(code)
+        today = datetime.now().date()
+        candidates = _recent_quarter_ends(today, back=4)
+
+        for q in candidates:
+            try:
+                df = self._ak.stock_report_fund_hold(
+                    symbol="基金持仓", date=q.strftime("%Y%m%d"),
+                )
+            except Exception:
+                continue
+            if df is None or df.empty:
+                continue
+            hit = df[df["股票代码"] == sym.code]
+            if hit.empty:
+                continue
+            row = hit.iloc[0]
+            return FundHoldingSummary(
+                code=sym.code,
+                period=q.strftime("%Y%m%d"),
+                fund_count=int(row.get("持有基金家数")) if pd.notna(row.get("持有基金家数")) else None,
+                total_shares=_to_float(row.get("持股总数")),
+                holdings_value=_to_float(row.get("持股市值")),
+                change_direction=_clean(row.get("持股变化")),
+                change_pct=_to_float(row.get("持股变动比例")),
+            )
+        return None
+
+    # ---- research: 卖方研报 + 一致预期 ----
+    @cached("research_reports", ttl_hours=24)
+    def research_reports(self, code: str, limit: int = 20) -> list[ResearchReport]:
+        sym = Symbol.parse(code)
+        try:
+            df = self._ak.stock_research_report_em(symbol=sym.code)
+        except Exception:
+            return []
+        if df is None or df.empty:
+            return []
+        # 按日期降序取前 limit
+        if "日期" in df.columns:
+            try:
+                df = df.sort_values("日期", ascending=False)
+            except Exception:
+                pass
+        df = df.head(limit)
+
+        # 明年 = 当前年 + 1；找预测收益列（如 '2027-盈利预测-收益'）
+        year_next = datetime.now().year + 1
+        year_2y = year_next + 1
+        eps_next_col = _first_present(df.columns, [f"{year_next}-盈利预测-收益"])
+        pe_next_col = _first_present(df.columns, [f"{year_next}-盈利预测-市盈率"])
+        eps_2y_col = _first_present(df.columns, [f"{year_2y}-盈利预测-收益"])
+        pe_2y_col = _first_present(df.columns, [f"{year_2y}-盈利预测-市盈率"])
+
+        out: list[ResearchReport] = []
+        for _, row in df.iterrows():
+            date_val = row.get("日期")
+            if hasattr(date_val, "strftime"):
+                date_str = date_val.strftime("%Y-%m-%d")
+            else:
+                date_str = str(date_val) if pd.notna(date_val) else None
+            out.append(ResearchReport(
+                code=sym.code,
+                title=str(row.get("报告名称", "")).strip(),
+                org=str(row.get("机构", "")).strip(),
+                rating=_clean(row.get("东财评级")),
+                date=date_str,
+                eps_next_year=_to_float(row.get(eps_next_col)) if eps_next_col else None,
+                pe_next_year=_to_float(row.get(pe_next_col)) if pe_next_col else None,
+                eps_2y=_to_float(row.get(eps_2y_col)) if eps_2y_col else None,
+                pe_2y=_to_float(row.get(pe_2y_col)) if pe_2y_col else None,
+            ))
+        return out
+
+    @cached("research_consensus", ttl_hours=24)
+    def consensus(self, code: str) -> ResearchConsensus:
+        reports = self.research_reports(code, limit=30)
+        if not reports:
+            return ResearchConsensus(code=code)
+
+        ratings: dict[str, int] = {}
+        eps_next: list[float] = []
+        pe_next: list[float] = []
+        for r in reports:
+            if r.rating:
+                ratings[r.rating] = ratings.get(r.rating, 0) + 1
+            if r.eps_next_year is not None:
+                eps_next.append(r.eps_next_year)
+            if r.pe_next_year is not None:
+                pe_next.append(r.pe_next_year)
+
+        eps_median = None
+        eps_min = None
+        eps_max = None
+        if eps_next:
+            eps_next_sorted = sorted(eps_next)
+            n = len(eps_next_sorted)
+            eps_median = eps_next_sorted[n // 2] if n % 2 else \
+                (eps_next_sorted[n // 2 - 1] + eps_next_sorted[n // 2]) / 2
+            eps_min = min(eps_next_sorted)
+            eps_max = max(eps_next_sorted)
+
+        pe_median = None
+        if pe_next:
+            pe_sorted = sorted(pe_next)
+            pn = len(pe_sorted)
+            pe_median = pe_sorted[pn // 2] if pn % 2 else \
+                (pe_sorted[pn // 2 - 1] + pe_sorted[pn // 2]) / 2
+
+        return ResearchConsensus(
+            code=code,
+            report_count=len(reports),
+            ratings=ratings,
+            eps_next_year_median=round(eps_median, 3) if eps_median is not None else None,
+            eps_next_year_min=eps_min,
+            eps_next_year_max=eps_max,
+            pe_next_year_median=round(pe_median, 2) if pe_median is not None else None,
+        )
+
+
+def _recent_quarter_ends(today: date, back: int = 4) -> list[date]:
+    """返回最近 N 个季度末（截至今天前）。今天是 2026-08-30 → [20260630, 20260331, ...]"""
+    year, month = today.year, today.month
+    # 计算当前季度
+    if month <= 3:
+        cq_year, cq_month = year - 1, 12
+    elif month <= 6:
+        cq_year, cq_month = year, 3
+    elif month <= 9:
+        cq_year, cq_month = year, 6
+    else:
+        cq_year, cq_month = year, 9
+
+    out: list[date] = []
+    y, m = cq_year, cq_month
+    for _ in range(back):
+        # 上一个季度末
+        last_day = 31 if m in (3, 12) else 30
+        out.append(date(y, m, last_day))
+        if m == 3:
+            y, m = y - 1, 12
+        else:
+            m -= 3
+    return out
 
 
 def _find_row(df: pd.DataFrame, indicator_col: str, needles: list[str]) -> pd.Series | None:
