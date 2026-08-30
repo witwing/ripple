@@ -9,6 +9,7 @@ from ripple.analyze.study import study
 from ripple.core.config import load
 from ripple.providers.base import (
     Announcement,
+    FinancialMetrics,
     HealthStatus,
     NewsItem,
     Quote,
@@ -27,7 +28,8 @@ class FakeAll:
 
     def profile(self, code: str) -> TickerProfile:
         return TickerProfile(code=code, name="贵州茅台", industry="白酒",
-                             exchange="SH", board="MAIN", list_date="2001-08-27")
+                             industry_l1="食品饮料", exchange="SH", board="MAIN",
+                             list_date="2001-08-27", main_business="酿造和销售")
 
     def snapshot(self, code: str) -> Quote:
         return Quote(code=code, ts=datetime.utcnow(), price=1500.0, prev_close=1480.0)
@@ -53,6 +55,22 @@ class FakeAll:
             "归属于母公司所有者的净利润": [300, 150, 250, 200, 150],
         })
 
+    def financial_metrics(self, code: str, periods: int = 8):
+        return [FinancialMetrics(code=code, period="20260630",
+                                 roe=17.0, gross_margin=91.0, net_margin=50.0,
+                                 debt_ratio=15.0, ocf_to_revenue=0.77,
+                                 revenue_yoy_pct=1.3, net_profit_yoy_pct=-2.0,
+                                 eps=35.5, bvps=200.0)]
+
+    def index_daily(self, index_code: str, start: date, end: date) -> pd.DataFrame:
+        n = (end - start).days + 1
+        return pd.DataFrame({
+            "date": [(start + timedelta(days=i)).isoformat() for i in range(n)],
+            "open": [4000.0] * n, "high": [4100.0] * n, "low": [3900.0] * n,
+            "close": [4000 + i * 0.5 for i in range(n)],
+            "volume": [1e8] * n,
+        })
+
     def announcements(self, code: str, since: date):
         return [Announcement(code=code, title="回购公告", url="",
                              publish_time=datetime.now(), kind="回购")]
@@ -67,7 +85,8 @@ def _install_fake():
     registry._providers.clear()
     registry._failed.clear()
     fake = FakeAll()
-    for cap in ("meta", "quote", "fundamental", "disclosure", "news"):
+    for cap in ("meta", "quote", "fundamental", "metrics", "index",
+                "disclosure", "news"):
         registry._chains[cap] = [("fake", fake)]
     registry._providers["fake"] = fake
 

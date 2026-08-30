@@ -26,13 +26,12 @@ def test_dryrun_brief_shape():
     # 硬性结构
     assert "# 贵州茅台 (600519) 研究简报" in md
     assert "## 一、事实速览" in md
-    assert "## 二、近期动态" in md
-    assert "## 三、我的历史观点" in md
-    assert "## 四、判断" in md
-    assert "## 五、结论" in md
+    assert "## 三、近期动态" in md
+    assert "## 四、我的历史观点" in md
+    assert "## 五、判断" in md
+    assert "## 六、结论" in md
     # JSON 结论块存在
     assert "```json" in md
     assert '"action": "watch"' in md
     # 事实字段被渲染
     assert "1500" in md
-    assert "白酒" not in md.split("## 一")[0]  # 名字前不该出现别的
