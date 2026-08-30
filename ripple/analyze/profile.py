@@ -14,7 +14,15 @@ from typing import Any
 
 import pandas as pd
 
-from ripple.providers.base import FinancialMetrics, Quote, Valuation
+from ripple.providers.base import (
+    FinancialMetrics,
+    FundHoldingSummary,
+    MarginSnapshot,
+    Quote,
+    ResearchConsensus,
+    ShareholderSnapshot,
+    Valuation,
+)
 
 
 @dataclass
@@ -59,6 +67,25 @@ class Profile:
     price_vs_hs300_1m_pp: float | None = None  # 近 1 月 vs 沪深300（百分点差）
     price_vs_hs300_3m_pp: float | None = None
     price_vs_hs300_1y_pp: float | None = None
+
+    # 资金面 / 筹码
+    margin_balance: float | None = None            # 融资余额 (元)
+    margin_buy: float | None = None                # 当日融资买入 (元)
+    margin_balance_date: str | None = None
+    shareholder_count: int | None = None
+    shareholder_count_change_pct: float | None = None  # 环比 %
+    shareholder_period: str | None = None
+    # 公募重仓
+    fund_count: int | None = None                  # 持仓基金家数
+    fund_holdings_value: float | None = None       # 持股市值
+    fund_change_direction: str | None = None       # 加仓/减仓
+    fund_change_pct: float | None = None           # 环比 %
+    fund_period: str | None = None
+    # 卖方共识
+    analyst_report_count: int | None = None
+    analyst_ratings: dict[str, int] | None = None   # {"买入": 21, ...}
+    consensus_eps_next_year: float | None = None
+    consensus_pe_next_year: float | None = None
 
     # 追加字段留白
     extra: dict[str, Any] = field(default_factory=dict)
@@ -161,6 +188,10 @@ def build_profile(
     income: pd.DataFrame | None,
     metrics: list[FinancialMetrics] | None = None,
     index_kline: pd.DataFrame | None = None,
+    margin: MarginSnapshot | None = None,
+    shareholders: ShareholderSnapshot | None = None,
+    fund_holdings: FundHoldingSummary | None = None,
+    consensus: ResearchConsensus | None = None,
 ) -> Profile:
     """装 Profile。所有输入允许为 None，缺失字段留 None。"""
     p = Profile(code=code, name=name, industry=industry)
@@ -223,5 +254,32 @@ def build_profile(
             stk_pct = _pct_change(latest_close, _price_at_or_before(kline, past))
             idx_pct = _pct_change(idx_latest, _price_at_or_before(index_kline, past))
             setattr(p, field_name, _diff_pp(stk_pct, idx_pct))
+
+    # 资金面：融资融券
+    if margin:
+        p.margin_balance = margin.margin_balance
+        p.margin_buy = margin.margin_buy
+        p.margin_balance_date = margin.date
+
+    # 筹码：股东户数
+    if shareholders:
+        p.shareholder_count = shareholders.count
+        p.shareholder_count_change_pct = shareholders.count_change_pct
+        p.shareholder_period = shareholders.period
+
+    # 公募重仓
+    if fund_holdings:
+        p.fund_count = fund_holdings.fund_count
+        p.fund_holdings_value = fund_holdings.holdings_value
+        p.fund_change_direction = fund_holdings.change_direction
+        p.fund_change_pct = fund_holdings.change_pct
+        p.fund_period = fund_holdings.period
+
+    # 卖方共识
+    if consensus and consensus.report_count > 0:
+        p.analyst_report_count = consensus.report_count
+        p.analyst_ratings = consensus.ratings
+        p.consensus_eps_next_year = consensus.eps_next_year_median
+        p.consensus_pe_next_year = consensus.pe_next_year_median
 
     return p

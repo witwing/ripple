@@ -23,8 +23,12 @@ from ripple.notes.search import Hit
 from ripple.providers.base import (
     Announcement,
     FinancialMetrics,
+    FundHoldingSummary,
+    MarginSnapshot,
     NewsItem,
     Quote,
+    ResearchConsensus,
+    ShareholderSnapshot,
     TickerProfile,
     Valuation,
 )
@@ -195,6 +199,17 @@ def study(
         registry.call, "index", "index_daily", HS300,
         (date.today() - timedelta(days=400)), date.today(),
     )
+    # 资金面
+    margin: MarginSnapshot | None = _safe(registry.call, "capital", "margin_snapshot", code)
+    shareholders: ShareholderSnapshot | None = _safe(
+        registry.call, "capital", "shareholder_count", code
+    )
+    # 机构
+    fund_holdings: FundHoldingSummary | None = _safe(
+        registry.call, "institution", "fund_holdings", code
+    )
+    # 卖方
+    consensus: ResearchConsensus | None = _safe(registry.call, "research", "consensus", code)
 
     log.info("[2/6] Snapshot — 落库")
     if quote:
@@ -207,6 +222,20 @@ def study(
                                     "gross_margin": metrics[0].gross_margin,
                                     "net_margin": metrics[0].net_margin,
                                     "debt_ratio": metrics[0].debt_ratio}, "akshare")
+    if margin:
+        _snapshot_row(code, "margin", {"date": margin.date, "balance": margin.margin_balance}, "akshare")
+    if fund_holdings:
+        _snapshot_row(code, "fund", {
+            "period": fund_holdings.period, "count": fund_holdings.fund_count,
+            "value": fund_holdings.holdings_value, "direction": fund_holdings.change_direction,
+            "change_pct": fund_holdings.change_pct,
+        }, "akshare")
+    if consensus and consensus.report_count > 0:
+        _snapshot_row(code, "consensus", {
+            "report_count": consensus.report_count, "ratings": consensus.ratings,
+            "eps_next_year_median": consensus.eps_next_year_median,
+            "pe_next_year_median": consensus.pe_next_year_median,
+        }, "akshare")
 
     log.info("[3/6] Recall — 检索历史笔记")
     q = _recall_query(name, industry, code)
@@ -218,6 +247,8 @@ def study(
         code=code, name=name, industry=industry,
         quote=quote, kline=kline, valuation=valuation,
         income=income, metrics=metrics, index_kline=index_kline,
+        margin=margin, shareholders=shareholders,
+        fund_holdings=fund_holdings, consensus=consensus,
     )
 
     log.info("[4b/6] Peers — 装同行对比表")

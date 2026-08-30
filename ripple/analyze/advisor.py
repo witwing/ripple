@@ -22,12 +22,15 @@ _JSON_BLOCK = re.compile(r"```json\s*(\{.*?\})\s*```", re.DOTALL)
 
 
 def parse_from_brief(markdown: str) -> ParsedAdvice:
-    """解析 brief markdown 末尾的 ```json``` 结论块；失败时返回保守默认。"""
-    match = _JSON_BLOCK.search(markdown)
-    if not match:
+    """解析 brief markdown 末尾的 ```json``` 结论块；失败时返回保守默认。
+
+    取**最后一个** JSON 代码块，避免 LLM 在正文中嵌入示例 JSON 时误配。
+    """
+    matches = _JSON_BLOCK.findall(markdown)
+    if not matches:
         return _fallback("未找到 JSON 结论块")
     try:
-        data = json.loads(match.group(1))
+        data = json.loads(matches[-1])
     except json.JSONDecodeError as e:
         return _fallback(f"JSON 解析失败：{e}")
 

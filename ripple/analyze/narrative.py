@@ -21,6 +21,8 @@ class BriefContext:
     user_stance: str = ""
     peers: list[dict] = field(default_factory=list)
     relative_summary: str = ""
+    capital_summary: str = ""    # 资金面 + 筹码变化的一行摘要
+    consensus_summary: str = ""  # 卖方共识的一行摘要
 
 
 def _summarize_kline(profile: Profile) -> str:
@@ -47,6 +49,36 @@ def _summarize_relative(profile: Profile) -> str:
     return "；".join(parts) if parts else ""
 
 
+def _summarize_capital(profile: Profile) -> str:
+    parts = []
+    if profile.margin_balance is not None:
+        parts.append(f"融资余额 {profile.margin_balance / 1e8:.1f} 亿元（{profile.margin_balance_date}）")
+    if profile.margin_buy is not None:
+        parts.append(f"当日融资买入 {profile.margin_buy / 1e8:.2f} 亿")
+    if profile.shareholder_count is not None:
+        chg = f"{profile.shareholder_count_change_pct:+.1f}%" if profile.shareholder_count_change_pct is not None else "-"
+        parts.append(f"股东户数 {profile.shareholder_count / 1e4:.1f} 万（环比 {chg}，截止 {profile.shareholder_period}）")
+    if profile.fund_count is not None:
+        chg = f"{profile.fund_change_pct:+.1f}%" if profile.fund_change_pct is not None else ""
+        direction = profile.fund_change_direction or ""
+        parts.append(f"公募 {profile.fund_count} 家持仓（{direction} {chg}）")
+    return "；".join(parts) if parts else ""
+
+
+def _summarize_consensus(profile: Profile) -> str:
+    if profile.analyst_report_count is None:
+        return ""
+    parts = [f"近期 {profile.analyst_report_count} 份研报"]
+    if profile.analyst_ratings:
+        rt = " / ".join(f"{k} {v}" for k, v in profile.analyst_ratings.items())
+        parts.append(rt)
+    if profile.consensus_eps_next_year is not None:
+        parts.append(f"明年 EPS 中位 {profile.consensus_eps_next_year:.2f}")
+    if profile.consensus_pe_next_year is not None:
+        parts.append(f"隐含 PE 中位 {profile.consensus_pe_next_year:.1f}")
+    return "  ·  ".join(parts)
+
+
 def _summarize_notes(hits: list[Hit]) -> str:
     if not hits:
         return "（未召回相关笔记）"
@@ -71,6 +103,8 @@ def build_context(
         profile=profile.to_dict(),
         recent_kline_summary=_summarize_kline(profile),
         relative_summary=_summarize_relative(profile),
+        capital_summary=_summarize_capital(profile),
+        consensus_summary=_summarize_consensus(profile),
         announcements=[
             {"date": a.publish_time.strftime("%Y-%m-%d"), "title": a.title, "kind": a.kind}
             for a in announcements[:10]
@@ -150,7 +184,15 @@ def render_dryrun_brief(ctx: BriefContext) -> str:
             )
         lines.append("")
 
-    lines.append("## 三、近期动态")
+    if ctx.capital_summary or ctx.consensus_summary:
+        lines.append("## 三、资金面与共识")
+        if ctx.capital_summary:
+            lines.append(f"- **资金/筹码**：{ctx.capital_summary}")
+        if ctx.consensus_summary:
+            lines.append(f"- **卖方共识**：{ctx.consensus_summary}")
+        lines.append("")
+
+    lines.append("## 四、近期动态")
     if ctx.announcements:
         lines.append("**公告**")
         for a in ctx.announcements:
@@ -164,15 +206,15 @@ def render_dryrun_brief(ctx: BriefContext) -> str:
         lines.append("（暂无公告与新闻）")
     lines.append("")
 
-    lines.append("## 四、我的历史观点")
+    lines.append("## 五、我的历史观点")
     lines.append(ctx.user_stance)
     lines.append("")
 
-    lines.append("## 五、判断")
+    lines.append("## 六、判断")
     lines.append("_dry-run 模式：无 LLM 综合推理。以下仅为客观事实拼装。_")
     lines.append("")
 
-    lines.append("## 六、结论")
+    lines.append("## 七、结论")
     lines.append("")
     lines.append("```json")
     lines.append('{')

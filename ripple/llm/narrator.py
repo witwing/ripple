@@ -23,6 +23,8 @@ def _render_prompt(template: str, ctx: BriefContext) -> str:
             "profile": ctx.profile,
             "recent_kline_summary": ctx.recent_kline_summary,
             "relative_summary": ctx.relative_summary,
+            "capital_summary": ctx.capital_summary,
+            "consensus_summary": ctx.consensus_summary,
             "peers": ctx.peers,
             "announcements": ctx.announcements,
             "news": ctx.news,
