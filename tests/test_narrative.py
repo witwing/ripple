@@ -23,13 +23,13 @@ def _sample_ctx() -> BriefContext:
 
 def test_dryrun_brief_shape():
     md = render_dryrun_brief(_sample_ctx())
-    # 硬性结构
+    # 硬性结构（v0.6 加了三、资金面与共识 后编号后移）
     assert "# 贵州茅台 (600519) 研究简报" in md
     assert "## 一、事实速览" in md
-    assert "## 三、近期动态" in md
-    assert "## 四、我的历史观点" in md
-    assert "## 五、判断" in md
-    assert "## 六、结论" in md
+    assert "## 四、近期动态" in md
+    assert "## 五、我的历史观点" in md
+    assert "## 六、判断" in md
+    assert "## 七、结论" in md
     # JSON 结论块存在
     assert "```json" in md
     assert '"action": "watch"' in md

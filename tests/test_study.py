@@ -10,9 +10,13 @@ from ripple.core.config import load
 from ripple.providers.base import (
     Announcement,
     FinancialMetrics,
+    FundHoldingSummary,
     HealthStatus,
+    MarginSnapshot,
     NewsItem,
     Quote,
+    ResearchConsensus,
+    ShareholderSnapshot,
     TickerProfile,
     Valuation,
 )
@@ -79,6 +83,34 @@ class FakeAll:
         return [NewsItem(code=code, title="行业景气回升", url="",
                          publish_time=datetime.now(), source="新华社")]
 
+    def margin_snapshot(self, code: str):
+        return MarginSnapshot(code=code, date="20260828",
+                              margin_balance=1.7e10, margin_buy=1.6e8,
+                              short_balance=None, short_sell_volume=3000.0)
+
+    def shareholder_count(self, code: str):
+        return ShareholderSnapshot(code=code, period="2026-06-30",
+                                   count=296404, count_change_pct=21.9,
+                                   holdings_per_account=5e6)
+
+    def fund_holdings(self, code: str):
+        return FundHoldingSummary(code=code, period="20260630",
+                                  fund_count=1242, total_shares=4.16e7,
+                                  holdings_value=4.94e10,
+                                  change_direction="减仓", change_pct=-36.65)
+
+    def research_reports(self, code: str, limit: int = 20):
+        return []
+
+    def consensus(self, code: str):
+        return ResearchConsensus(
+            code=code, report_count=30,
+            ratings={"买入": 21, "增持": 6, "持有": 3},
+            eps_next_year_median=71.95,
+            eps_next_year_min=68.97, eps_next_year_max=76.93,
+            pe_next_year_median=19.0,
+        )
+
 
 def _install_fake():
     registry._chains.clear()
@@ -86,7 +118,7 @@ def _install_fake():
     registry._failed.clear()
     fake = FakeAll()
     for cap in ("meta", "quote", "fundamental", "metrics", "index",
-                "disclosure", "news"):
+                "disclosure", "news", "capital", "institution", "research"):
         registry._chains[cap] = [("fake", fake)]
     registry._providers["fake"] = fake
 
