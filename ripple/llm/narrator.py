@@ -22,6 +22,8 @@ def _render_prompt(template: str, ctx: BriefContext) -> str:
             "ticker": ctx.ticker,
             "profile": ctx.profile,
             "recent_kline_summary": ctx.recent_kline_summary,
+            "relative_summary": ctx.relative_summary,
+            "peers": ctx.peers,
             "announcements": ctx.announcements,
             "news": ctx.news,
             "recalled_notes": ctx.recalled_notes,

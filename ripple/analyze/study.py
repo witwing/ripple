@@ -11,7 +11,8 @@ from sqlalchemy import select
 
 from ripple.analyze.advisor import ParsedAdvice, parse_from_brief
 from ripple.analyze.narrative import BriefContext, build_context, render_dryrun_brief
-from ripple.analyze.profile import Profile, build_profile
+from ripple.analyze.peers import peers_of
+from ripple.analyze.profile import PeerRow, Profile, build_profile
 from ripple.core import paths
 from ripple.core.config import Config
 from ripple.core.logger import get_logger
@@ -19,12 +20,22 @@ from ripple.core.symbol import Symbol
 from ripple.models import Advice, Brief, Snapshot, Ticker, session
 from ripple.notes import search
 from ripple.notes.search import Hit
-from ripple.providers.base import Announcement, NewsItem, Quote, Valuation
+from ripple.providers.base import (
+    Announcement,
+    FinancialMetrics,
+    NewsItem,
+    Quote,
+    TickerProfile,
+    Valuation,
+)
 from ripple.providers.registry import registry
 
 log = get_logger(__name__)
 
 Narrator = Callable[[BriefContext], tuple[str, str]]  # returns (markdown, model_id)
+
+# 相对基准指数（沪深300）
+HS300 = "sh000300"
 
 
 @dataclass
@@ -69,16 +80,86 @@ def _recall_query(name: str | None, industry: str | None, code: str) -> str:
     return " ".join(parts)
 
 
-def _fetch_name_industry(code: str) -> tuple[str | None, str | None]:
+def _fetch_meta(code: str) -> TickerProfile | None:
+    """始终优先 provider 取（因为 profile 现在含更多字段）；DB 里的当缓存。"""
+    prof = _safe(registry.call, "meta", "profile", code)
+    if prof:
+        # 落 ticker 表方便 watch list 展示
+        with session() as s:
+            t = s.get(Ticker, code)
+            if t is None:
+                t = Ticker(code=code)
+                s.add(t)
+            t.name = prof.name
+            t.exchange = prof.exchange
+            t.board = prof.board
+            t.industry = prof.industry
+            t.list_date = prof.list_date
+            t.meta_json = {
+                "industry_l1": prof.industry_l1,
+                "total_mv": prof.total_mv,
+                "float_mv": prof.float_mv,
+                "main_business": prof.main_business,
+            }
+            t.updated_at = datetime.utcnow()
+            s.commit()
+        return prof
+    # 兜底：从 DB 拉
     with session() as s:
         t = s.get(Ticker, code)
         if t:
-            return t.name, t.industry
-    # 现拉一次
-    profile = _safe(registry.call, "meta", "profile", code)
-    if profile:
-        return profile.name, profile.industry
-    return None, None
+            return TickerProfile(code=t.code, name=t.name or code, exchange=t.exchange,
+                                 board=t.board, industry=t.industry, list_date=t.list_date)
+    return None
+
+
+def _build_peers_table(self_code: str, industry: str | None,
+                       self_profile: Profile) -> list[PeerRow]:
+    """为每个同行 code 拉 valuation + 最新价，装 PeerRow 列表；自身放最前。"""
+    peer_codes = peers_of(industry, self_code=self_code, limit=4)
+    if not peer_codes:
+        return []
+    rows: list[PeerRow] = []
+    for pc in peer_codes:
+        if pc == self_code:
+            # 自身用已算的 profile
+            rows.append(PeerRow(
+                code=pc, name=self_profile.name,
+                pe_ttm=self_profile.pe_ttm, pb=self_profile.pb, roe=self_profile.roe,
+                price_change_1y_pct=self_profile.price_change_1y_pct,
+            ))
+            continue
+        val = _safe(registry.call, "fundamental", "valuation", pc)
+        metrics_list = _safe(registry.call, "metrics", "financial_metrics", pc, 5) or []
+        # 简单拿最近一年涨跌
+        kline = _safe(
+            registry.call, "quote", "daily_kline", pc,
+            (date.today() - timedelta(days=400)), date.today(),
+        )
+        change_1y = None
+        if kline is not None and not kline.empty and "close" in kline.columns:
+            import pandas as pd
+            try:
+                dates = pd.to_datetime(kline["date"])
+                latest = float(kline["close"].iloc[-1])
+                past_mask = dates <= pd.Timestamp(date.today() - timedelta(days=365))
+                if past_mask.any():
+                    past = float(kline[past_mask]["close"].iloc[-1])
+                    if past:
+                        change_1y = round((latest - past) / past * 100, 2)
+            except Exception:
+                pass
+        # 名字：直接调一次 meta.profile（多数已缓存）
+        peer_meta = _safe(registry.call, "meta", "profile", pc)
+        rows.append(PeerRow(
+            code=pc,
+            name=peer_meta.name if peer_meta else pc,
+            pe_ttm=val.pe_ttm if val else None,
+            pb=val.pb if val else None,
+            roe=metrics_list[0].roe if metrics_list else None,
+            price_change_1y_pct=change_1y,
+        ))
+    return rows
 
 
 def study(
@@ -94,6 +175,10 @@ def study(
     now = datetime.now().astimezone()
 
     log.info(f"[1/6] Fetch — 拉取 {code} 数据")
+    meta: TickerProfile | None = _fetch_meta(code)
+    name = meta.name if meta else code
+    industry = meta.industry if meta else None
+
     quote: Quote | None = _safe(registry.call, "quote", "snapshot", code)
     kline = _safe(
         registry.call, "quote", "daily_kline", code,
@@ -101,27 +186,46 @@ def study(
     )
     valuation: Valuation | None = _safe(registry.call, "fundamental", "valuation", code)
     income = _safe(registry.call, "fundamental", "financial_reports", code, "income", 8)
+    metrics: list[FinancialMetrics] = _safe(registry.call, "metrics", "financial_metrics", code, 8) or []
     since = date.today() - timedelta(days=90)
     announcements: list[Announcement] = _safe(registry.call, "disclosure", "announcements", code, since) or []
     news: list[NewsItem] = _safe(registry.call, "news", "news", code, since, 20) or []
+    # 相对指数
+    index_kline = _safe(
+        registry.call, "index", "index_daily", HS300,
+        (date.today() - timedelta(days=400)), date.today(),
+    )
 
     log.info("[2/6] Snapshot — 落库")
     if quote:
         _snapshot_row(code, "quote", {"price": quote.price, "prev_close": quote.prev_close}, "akshare")
     if valuation:
-        _snapshot_row(code, "val", {"pe_ttm": valuation.pe_ttm, "pb": valuation.pb}, "akshare")
+        _snapshot_row(code, "val", {"pe_ttm": valuation.pe_ttm, "pb": valuation.pb,
+                                     "pe_pct_5y": valuation.pe_pct_5y}, "akshare")
+    if metrics:
+        _snapshot_row(code, "fin", {"period": metrics[0].period, "roe": metrics[0].roe,
+                                    "gross_margin": metrics[0].gross_margin,
+                                    "net_margin": metrics[0].net_margin,
+                                    "debt_ratio": metrics[0].debt_ratio}, "akshare")
 
     log.info("[3/6] Recall — 检索历史笔记")
-    name, industry = _fetch_name_industry(code)
     q = _recall_query(name, industry, code)
     hits: list[Hit] = search.recall(cfg, q, k=8)
     log.info(f"       召回 {len(hits)} 条")
 
-    log.info("[4/6] Profile — 计算基本面画像")
-    profile = build_profile(code, name, quote, kline, valuation, income)
+    log.info("[4/6] Profile — 计算基本面画像（含相对指数）")
+    profile = build_profile(
+        code=code, name=name, industry=industry,
+        quote=quote, kline=kline, valuation=valuation,
+        income=income, metrics=metrics, index_kline=index_kline,
+    )
+
+    log.info("[4b/6] Peers — 装同行对比表")
+    peers = _build_peers_table(code, industry, profile)
+    log.info(f"        {len(peers)} 家同行")
 
     log.info("[5/6] Narrate — 生成简报")
-    ctx = build_context(code, name, industry, profile, announcements, news, hits)
+    ctx = build_context(code, name, industry, profile, announcements, news, hits, peers=peers)
     if narrator is None:
         markdown = render_dryrun_brief(ctx)
         model_id = "dry-run"
