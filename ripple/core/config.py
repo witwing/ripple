@@ -13,6 +13,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "providers": {
         "quote": ["akshare"],
         "fundamental": ["akshare"],
+        "metrics": ["akshare"],
+        "index": ["akshare"],
         "disclosure": ["akshare"],
         "news": ["akshare"],
         "meta": ["akshare"],
@@ -24,10 +26,12 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "daily_kline": 12,
             "snapshot": 0.1,
             "financial_reports": 240,
+            "financial_metrics": 240,
             "valuation": 12,
             "profile": 240,
             "announcements": 6,
             "news": 1,
+            "index_daily": 24,
         },
     },
     "rate_limit": {

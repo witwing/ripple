@@ -14,6 +14,7 @@ import pandas as pd
 from ripple.core.symbol import Symbol
 from ripple.providers.base import (
     Announcement,
+    FinancialMetrics,
     HealthStatus,
     NewsItem,
     Quote,
@@ -53,29 +54,47 @@ class AkshareProvider:
     # ---- meta ----
     @cached("profile", ttl_hours=240)
     def profile(self, code: str) -> TickerProfile:
-        """从 sina 快照 + stock_value_em 组合出 profile。
+        """从 cninfo 巨潮的公司资料 + 行业分类 + stock_value_em 组合出 profile。
+
         push2.eastmoney.com 常被反爬，所以避开走 eastmoney 的接口。
+        cninfo 是证监会指定的信披平台，权威度最高。
         """
         sym = Symbol.parse(code)
         name = sym.code
+        industry = None
+        industry_l1 = None
+        list_date: str | None = None
+        main_business: str | None = None
         total_mv: float | None = None
         float_mv: float | None = None
 
-        # 名字：sina 快照第一列就是股票简称
+        # cninfo 公司资料：名字、行业、上市日期、主营
         try:
-            import requests
-            r = requests.get(
-                f"https://hq.sinajs.cn/list={sym.to_akshare()}",
-                headers={"Referer": "https://finance.sina.com.cn", "User-Agent": "Mozilla/5.0"},
-                timeout=8,
-            )
-            r.encoding = "gbk"
-            text = r.text
-            if "=" in text and '"' in text:
-                payload = text.split('"')[1]
-                fields = payload.split(",")
-                if fields and fields[0]:
-                    name = fields[0]
+            info = self._ak.stock_profile_cninfo(symbol=sym.code)
+            if info is not None and not info.empty:
+                row = info.iloc[0]
+                name = str(row.get("A股简称") or row.get("公司名称") or sym.code)
+                # cninfo 用的是证监会行业分类，全称如"酒、饮料和精制茶制造业"
+                industry_l1 = _clean(row.get("所属行业"))
+                list_date = _normalize_date(row.get("上市日期"))
+                main_business = _clean(row.get("主营业务"))
+        except Exception:
+            pass
+
+        # cninfo 行业变更：拿到"行业中类"（如"白酒"），比 industry_l1 更精细
+        try:
+            ind = self._ak.stock_industry_change_cninfo(symbol=sym.code)
+            if ind is not None and not ind.empty:
+                # 按变更日期取最新一条
+                if "变更日期" in ind.columns:
+                    ind = ind.sort_values("变更日期", ascending=False)
+                row = ind.iloc[0]
+                sub = _clean(row.get("行业中类"))
+                if sub:
+                    industry = sub
+                # 如果 profile 那里没拿到 l1，用这里的补上
+                if not industry_l1:
+                    industry_l1 = _clean(row.get("行业门类") or row.get("行业次类"))
         except Exception:
             pass
 
@@ -94,10 +113,12 @@ class AkshareProvider:
             name=name,
             exchange=sym.exchange,
             board=sym.board,
-            industry=None,  # sina 快照不含行业；后续如需要走另一接口补
-            list_date=None,
+            industry=industry,
+            industry_l1=industry_l1,
+            list_date=list_date,
             total_mv=total_mv,
             float_mv=float_mv,
+            main_business=main_business,
         )
 
     # ---- quote ----
@@ -312,6 +333,119 @@ class AkshareProvider:
             if len(results) >= limit:
                 break
         return results
+
+    # ---- metrics ----
+    @cached("financial_metrics", ttl_hours=240)
+    def financial_metrics(self, code: str, periods: int = 8) -> list[FinancialMetrics]:
+        """从 stock_financial_abstract 抽出关键指标，每期一个 FinancialMetrics。
+
+        原表结构：行=('选项','指标')，列='报告日'（YYYYMMDD）。宽表数百行、上百列。
+        我们只挑关键行，抽出后按报告期转成一组 FinancialMetrics。
+        """
+        sym = Symbol.parse(code)
+        try:
+            df = self._ak.stock_financial_abstract(symbol=sym.code)
+        except Exception as e:
+            raise RuntimeError(f"akshare 拉财务综合指标失败：{e}") from e
+        if df is None or df.empty:
+            return []
+
+        # 报告期列：8 位数字或含 - 的日期字符串
+        date_cols = [c for c in df.columns if str(c).isdigit() and len(str(c)) == 8]
+        # 按日期降序
+        date_cols = sorted(date_cols, reverse=True)[:periods]
+        if not date_cols:
+            return []
+
+        # 指标关键词 → 我们的字段名
+        # 一个字段可能匹配多行（"净资产收益率" 会命中多行），按顺序取第一个即可
+        needle_map = {
+            "revenue":                ["营业总收入"],
+            "net_profit":             ["归属净利润", "净利润"],
+            "net_profit_deducted":    ["扣非净利润"],
+            "revenue_yoy_pct":        ["营业总收入同比", "营业总收入增长率"],
+            "net_profit_yoy_pct":     ["归属母公司净利润增长率", "归属净利润同比", "净利润同比"],
+            "roe":                    ["净资产收益率(ROE)"],
+            "roe_avg":                ["净资产收益率_平均"],
+            "gross_margin":           ["毛利率", "销售毛利率"],
+            "net_margin":             ["销售净利率"],
+            "debt_ratio":             ["资产负债率"],
+            "ocf_to_revenue":         ["经营性现金净流量/营业总收入"],
+            "eps":                    ["基本每股收益"],
+            "bvps":                   ["每股净资产"],
+        }
+        # 建 dict[period][field] = value
+        rows_by_period: dict[str, dict] = {p: {} for p in date_cols}
+        indicator_col = "指标" if "指标" in df.columns else df.columns[1]
+        for field, needles in needle_map.items():
+            row = _find_row(df, indicator_col, needles)
+            if row is None:
+                continue
+            for p in date_cols:
+                if p in row.index:
+                    rows_by_period[p][field] = _to_float(row[p])
+
+        # 装成 FinancialMetrics 列表
+        out: list[FinancialMetrics] = []
+        for p in date_cols:
+            m = rows_by_period[p]
+            out.append(FinancialMetrics(
+                code=sym.code, period=p,
+                revenue=m.get("revenue"),
+                net_profit=m.get("net_profit"),
+                net_profit_deducted=m.get("net_profit_deducted"),
+                revenue_yoy_pct=m.get("revenue_yoy_pct"),
+                net_profit_yoy_pct=m.get("net_profit_yoy_pct"),
+                roe=m.get("roe"),
+                roe_avg=m.get("roe_avg"),
+                gross_margin=m.get("gross_margin"),
+                net_margin=m.get("net_margin"),
+                debt_ratio=m.get("debt_ratio"),
+                ocf_to_revenue=m.get("ocf_to_revenue"),
+                eps=m.get("eps"),
+                bvps=m.get("bvps"),
+            ))
+        return out
+
+    # ---- index ----
+    @cached("index_daily", ttl_hours=24)
+    def index_daily(self, index_code: str, start: date, end: date) -> pd.DataFrame:
+        """sina 指数日线。index_code 形如 'sh000300' / 'sh000905' / 'sz399006'。"""
+        try:
+            df = self._ak.stock_zh_index_daily(symbol=index_code)
+        except Exception as e:
+            raise RuntimeError(f"sina 拉指数 {index_code} 失败：{e}") from e
+        if df is None or df.empty:
+            return pd.DataFrame(columns=["date", "open", "high", "low", "close", "volume"])
+        # 过滤区间
+        if "date" in df.columns:
+            df = df.copy()
+            df["date"] = pd.to_datetime(df["date"])
+            mask = (df["date"] >= pd.Timestamp(start)) & (df["date"] <= pd.Timestamp(end))
+            df = df[mask].reset_index(drop=True)
+        return df
+
+
+def _find_row(df: pd.DataFrame, indicator_col: str, needles: list[str]) -> pd.Series | None:
+    """在 df[indicator_col] 里精确匹配 needles 列表中任一元素，返回第一个 hit 的 Series。"""
+    for needle in needles:
+        # 精确匹配优先
+        exact = df[df[indicator_col].astype(str) == needle]
+        if not exact.empty:
+            return exact.iloc[0]
+    # 精确都没命中就 contains
+    for needle in needles:
+        matches = df[df[indicator_col].astype(str).str.contains(needle, na=False, regex=False)]
+        if not matches.empty:
+            return matches.iloc[0]
+    return None
+
+
+def _clean(x) -> str | None:
+    if x is None:
+        return None
+    s = str(x).strip()
+    return s if s and s != "nan" else None
 
 
 def _first_present(columns, candidates: list[str]) -> str | None:
