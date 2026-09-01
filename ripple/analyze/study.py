@@ -279,12 +279,15 @@ def study(
     )
     brief_path.write_text(frontmatter + "\n" + markdown, encoding="utf-8")
 
-    log.info("[5b/6] Chart — 渲染可视化仪表盘")
-    chart_path = _render_chart(code, now, profile, peers, kline, index_kline)
-
     log.info("[6/6] Advise — 提取结论")
     parsed = parse_from_brief(markdown)
     advice_id = _new_id("adv")
+
+    log.info("[5b/6] Chart — 渲染可视化仪表盘")
+    action_cn = {"buy": "买入", "sell": "卖出", "hold": "持有",
+                 "watch": "观望"}.get(parsed.action, parsed.action)
+    chart_path = _render_chart(code, now, profile, peers, kline, index_kline,
+                               verdict=parsed.rationale, action_cn=action_cn)
 
     with session() as s:
         s.add(Brief(
@@ -309,7 +312,8 @@ def study(
     )
 
 
-def _render_chart(code, now, profile, peers, kline, index_kline):
+def _render_chart(code, now, profile, peers, kline, index_kline,
+                  verdict=None, action_cn=None):
     """渲染仪表盘 PNG。失败不阻断 study，返回 None。"""
     try:
         import pandas as pd
@@ -346,7 +350,8 @@ def _render_chart(code, now, profile, peers, kline, index_kline):
         chart_dir = paths.briefs_dir() / now.strftime("%Y%m%d")
         chart_dir.mkdir(parents=True, exist_ok=True)
         out = chart_dir / f"{code}_{now.strftime('%H%M%S')}.png"
-        return render_dashboard(profile, peers, dates, closes, idx_closes, out_path=out)
+        return render_dashboard(profile, peers, dates, closes, idx_closes,
+                                out_path=out, verdict=verdict, action_cn=action_cn)
     except Exception as e:  # noqa: BLE001
         log.warning(f"仪表盘渲染失败：{e}")
         return None
