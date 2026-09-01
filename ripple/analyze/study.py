@@ -10,6 +10,7 @@ from typing import Callable
 from sqlalchemy import select
 
 from ripple.analyze.advisor import ParsedAdvice, parse_from_brief
+from ripple.analyze.digest import build_digest
 from ripple.analyze.narrative import BriefContext, build_context, render_dryrun_brief
 from ripple.analyze.peers import peers_of
 from ripple.analyze.profile import PeerRow, Profile, build_profile
@@ -51,6 +52,8 @@ class StudyResult:
     profile: Profile
     context: BriefContext
     chart_path: Path | None = None
+    markdown: str = ""       # 完整简报正文（不含 frontmatter）
+    digest: str = ""         # 精简判断文字（配图用）
 
 
 def _safe(fn: Callable, *args, **kwargs):
@@ -300,6 +303,8 @@ def study(
         brief_id=brief_id, brief_path=brief_path,
         advice_id=advice_id, advice=parsed,
         profile=profile, context=ctx, chart_path=chart_path,
+        markdown=markdown,
+        digest=build_digest(markdown, parsed, name or code, code),
     )
 
 
