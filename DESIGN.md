@@ -21,6 +21,7 @@
 | v0.7 | 2026-09-01 | 报告美化：新增 dashboard.py（信号灯🟢🟡🔴 + 分位条 + 四维星级评分，纯规则）；简报改为 8-9 段结构（信号面板/关键指标/同行/资金面/动态/历史观点/价值评分/短中长期洞察/价值分析/结论）；结论 JSON 扩展 horizon_views + value_scores；CLI 展示周期观点与星级评分 |
 | v0.8 | 2026-09-01 | 可视化仪表盘：新增 render.py（matplotlib PNG，深色主题 + Noto CJK）；study 生成一张图表——信号灯行 / 估值分位条 / 四维评分点阵 / 同行 ROE×PE 散点 / 近一年 vs 沪深300 归一化走势；图表与简报同目录 |
 | v0.9 | 2026-09-01 | 图文分工固化：新增 digest.py（只抽判断章节：动作条+周期观点+短中长期洞察+价值分析，不重复图里的数据）。标准输出 = 图(事实层) + 判断精炼(判断层)，两者不冗余。CLI study 默认打印判断精炼（--no-digest 关闭） |
+| v0.10 | 2026-09-01 | M3 模拟组合：portfolio/position/trade/nav_point 模型；A股交易规则（整手+佣金+印花税+过户费）；移动加权成本 + 已实现/浮动盈亏；mark-to-market 净值 vs 沪深300；CLI sim init/buy/sell/status/report/history；见 §8b |
 
 ---
 
@@ -431,7 +432,51 @@ data_sources:
 
 ---
 
-## 9. LLM 使用策略
+## 8b. 模拟组合（M3）
+
+**目标**：把 study 出的 Advice 变成可跟踪的纸面持仓，事后能算盈亏、比基准。不接实盘。
+
+### 8b.1 A 股交易规则（模拟但真实）
+
+- **整手**：买入按 100 股整数倍；不足一手拒绝
+- **佣金**：成交额 × 万分之 2.5，最低 5 元（买卖都收）
+- **印花税**：仅卖出，成交额 × 万分之 5
+- **过户费**：成交额 × 万分之 0.1（沪深都按此简化）
+- 费用合计在成交时从现金扣除；买入总成本 = 价 × 量 + 费；卖出净得 = 价 × 量 − 费
+
+### 8b.2 成本与盈亏
+
+- **成本基础**：移动加权平均成本（买入摊薄，卖出不改单位成本）
+- **已实现盈亏**：卖出时 =（卖出净得 − 卖出量 × 单位成本）
+- **浮动盈亏**：持仓量 ×（现价 − 单位成本）
+- 费用计入成本 / 冲减收益，使盈亏口径贴近真实
+
+### 8b.3 数据模型（在既有表上扩展）
+
+| 表 | 字段 | 说明 |
+|---|---|---|
+| portfolio | id, name, cash, init_cash, created | 一个模拟组合；init_cash 用于算总收益 |
+| position | portfolio_id, code, qty, avg_cost, updated | 当前持仓（买卖后即时维护） |
+| trade | id, portfolio_id, code, side, price, qty, fee, realized_pnl, ts, advice_id? | 每笔成交流水 |
+| nav_point | portfolio_id, date, nav, cash, holdings_value | 每次快照的净值点，画曲线用 |
+
+### 8b.4 CLI
+
+```bash
+ripple sim init [--cash 1000000]        # 建默认组合（幂等）
+ripple sim buy  600519 100 [--price 1300] [--from-advice adv_xxx]
+ripple sim sell 600519 100 [--price 1350]
+ripple sim status                       # 持仓表 + 现金 + 浮动盈亏
+ripple sim report [--snapshot]          # 净值、总收益、vs 沪深300；--snapshot 落一个 nav_point
+ripple sim history [--code 600519]      # 成交流水
+```
+
+- `--price` 缺省时用 quote provider 拉现价（模拟"市价单"）
+- `--from-advice` 把这笔交易关联到某条 study 建议，M4 复盘时用
+- mark-to-market 用 quote.snapshot 现价；拉不到就用最近成交价兜底
+
+---
+
 
 | 场景 | 模型 | 理由 |
 |---|---|---|

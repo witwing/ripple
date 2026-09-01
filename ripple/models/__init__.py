@@ -96,20 +96,49 @@ class Portfolio(Base):
     id: Mapped[str] = mapped_column(String(32), primary_key=True)
     name: Mapped[str] = mapped_column(String(64))
     cash: Mapped[float] = mapped_column(Float, default=0.0)
+    init_cash: Mapped[float] = mapped_column(Float, default=0.0)
+    created: Mapped[datetime] = mapped_column(default=datetime.utcnow)
     nav_json: Mapped[dict | None] = mapped_column(JSON)
+
+
+class Position(Base):
+    """当前持仓，买卖后即时维护。"""
+    __tablename__ = "position"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    portfolio_id: Mapped[str] = mapped_column(ForeignKey("portfolio.id"), index=True)
+    code: Mapped[str] = mapped_column(String(8), index=True)
+    qty: Mapped[int] = mapped_column(Integer, default=0)
+    avg_cost: Mapped[float] = mapped_column(Float, default=0.0)
+    updated: Mapped[datetime] = mapped_column(default=datetime.utcnow)
 
 
 class Trade(Base):
     __tablename__ = "trade"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    portfolio_id: Mapped[str] = mapped_column(ForeignKey("portfolio.id"))
+    portfolio_id: Mapped[str] = mapped_column(ForeignKey("portfolio.id"), index=True)
     ticker: Mapped[str] = mapped_column(String(8), index=True)
     side: Mapped[str] = mapped_column(String(4))  # buy/sell
     price: Mapped[float] = mapped_column(Float)
     qty: Mapped[int] = mapped_column(Integer)
+    fee: Mapped[float] = mapped_column(Float, default=0.0)
+    realized_pnl: Mapped[float | None] = mapped_column(Float)
     ts: Mapped[datetime] = mapped_column(default=datetime.utcnow)
     advice_id: Mapped[str | None] = mapped_column(ForeignKey("advice.id"))
+
+
+class NavPoint(Base):
+    """净值快照点，画曲线用。"""
+    __tablename__ = "nav_point"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    portfolio_id: Mapped[str] = mapped_column(ForeignKey("portfolio.id"), index=True)
+    date: Mapped[str] = mapped_column(String(10))  # YYYY-MM-DD
+    nav: Mapped[float] = mapped_column(Float)
+    cash: Mapped[float] = mapped_column(Float)
+    holdings_value: Mapped[float] = mapped_column(Float)
+    ts: Mapped[datetime] = mapped_column(default=datetime.utcnow)
 
 
 class Review(Base):

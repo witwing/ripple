@@ -405,5 +405,155 @@ def study_cmd(
         console.print(result.digest)
 
 
+# ---- sim ----
+sim_app = typer.Typer(help="模拟组合")
+app.add_typer(sim_app, name="sim")
+
+
+@sim_app.command("init")
+def sim_init(cash: float = typer.Option(1_000_000.0, "--cash", help="初始现金")):
+    """创建默认模拟组合（幂等）。"""
+    _bootstrap()
+    from ripple.simulate import ledger
+    p = ledger.get_or_create_portfolio(cash=cash)
+    console.print(f"[green]✓[/green] 组合 [bold]{p.id}[/bold]（{p.name}）现金 {p.cash:,.2f}")
+
+
+def _resolve_price(code: str, price: Optional[float]) -> float:
+    if price is not None:
+        return price
+    try:
+        q = registry.call("quote", "snapshot", code)
+        if q and q.price:
+            return q.price
+    except Exception as e:  # noqa: BLE001
+        console.print(f"[yellow]![/yellow] 取现价失败：{e}")
+    raise typer.Exit(1)
+
+
+@sim_app.command("buy")
+def sim_buy(
+    code: str,
+    qty: int = typer.Argument(..., help="股数（100 整数倍）"),
+    price: Optional[float] = typer.Option(None, "--price", help="缺省用现价"),
+    from_advice: Optional[str] = typer.Option(None, "--from-advice", help="关联 advice_id"),
+):
+    """模拟买入。"""
+    _bootstrap()
+    from ripple.simulate import ledger
+    px = _resolve_price(code, price)
+    try:
+        r = ledger.buy(code, qty, px, advice_id=from_advice)
+    except ledger.TradeError as e:
+        console.print(f"[red]✗[/red] {e}")
+        raise typer.Exit(1)
+    console.print(
+        f"[green]✓ 买入[/green] {r.code} {r.qty}股 @ {r.price:.2f}  费 {r.fee:.2f}  "
+        f"→ 持仓 {r.qty_after}股 均价 {r.avg_cost_after:.3f}  现金 {r.cash_after:,.2f}"
+    )
+
+
+@sim_app.command("sell")
+def sim_sell(
+    code: str,
+    qty: int = typer.Argument(..., help="股数（100 整数倍）"),
+    price: Optional[float] = typer.Option(None, "--price", help="缺省用现价"),
+    from_advice: Optional[str] = typer.Option(None, "--from-advice", help="关联 advice_id"),
+):
+    """模拟卖出。"""
+    _bootstrap()
+    from ripple.simulate import ledger
+    px = _resolve_price(code, price)
+    try:
+        r = ledger.sell(code, qty, px, advice_id=from_advice)
+    except ledger.TradeError as e:
+        console.print(f"[red]✗[/red] {e}")
+        raise typer.Exit(1)
+    pnl_color = "green" if (r.realized_pnl or 0) >= 0 else "red"
+    console.print(
+        f"[green]✓ 卖出[/green] {r.code} {r.qty}股 @ {r.price:.2f}  费 {r.fee:.2f}  "
+        f"已实现[{pnl_color}]{r.realized_pnl:+,.2f}[/{pnl_color}]  现金 {r.cash_after:,.2f}"
+    )
+
+
+@sim_app.command("status")
+def sim_status():
+    """持仓 + 现金 + 浮动盈亏。"""
+    _bootstrap()
+    from ripple.simulate import report
+    rep = report.build_report()
+    if rep is None:
+        console.print("[dim]没有组合。先 `ripple sim init`。[/dim]")
+        return
+    console.print(f"[bold]{rep.name}[/bold]  现金 {rep.cash:,.2f}  持仓市值 {rep.holdings_value:,.2f}")
+    console.print(f"净值 [bold]{rep.nav:,.2f}[/bold]  "
+                  + (f"总收益 {_col(rep.total_return_pct)}%" if rep.total_return_pct is not None else ""))
+    if rep.holdings:
+        t = Table(show_header=True, header_style="bold")
+        t.add_column("代码"); t.add_column("股数", justify="right")
+        t.add_column("成本", justify="right"); t.add_column("现价", justify="right")
+        t.add_column("市值", justify="right"); t.add_column("浮盈", justify="right")
+        for h in rep.holdings:
+            upnl = f"{h.unrealized_pnl:+,.0f} ({h.unrealized_pct:+.1f}%)" \
+                if h.unrealized_pnl is not None else "-"
+            t.add_row(h.code, str(h.qty), f"{h.avg_cost:.3f}",
+                      f"{h.last_price:.2f}" if h.last_price else "-",
+                      f"{h.market_value:,.0f}", upnl)
+        console.print(t)
+    console.print(f"[dim]已实现盈亏合计 {rep.realized_pnl_total:+,.2f}  "
+                  f"浮动盈亏合计 {rep.unrealized_pnl_total:+,.2f}[/dim]")
+
+
+@sim_app.command("report")
+def sim_report(snapshot: bool = typer.Option(False, "--snapshot", help="落一个净值点")):
+    """净值报告；--snapshot 记录当前净值。"""
+    _bootstrap()
+    from ripple.simulate import report
+    rep = report.build_report()
+    if rep is None:
+        console.print("[dim]没有组合。[/dim]")
+        return
+    console.print(f"[bold]{rep.name}[/bold]")
+    console.print(f"  初始现金：{rep.init_cash:,.2f}")
+    console.print(f"  当前净值：{rep.nav:,.2f}（现金 {rep.cash:,.2f} + 持仓 {rep.holdings_value:,.2f}）")
+    if rep.total_return_pct is not None:
+        console.print(f"  总收益率：{_col(rep.total_return_pct)}%")
+    console.print(f"  已实现 {rep.realized_pnl_total:+,.2f}  浮动 {rep.unrealized_pnl_total:+,.2f}")
+    if snapshot:
+        np = report.snapshot_nav()
+        if np:
+            console.print(f"[green]✓[/green] 已记录净值点 {np.date}：{np.nav:,.2f}")
+
+
+@sim_app.command("history")
+def sim_history(code: Optional[str] = typer.Option(None, "--code", help="只看某支")):
+    """成交流水。"""
+    _bootstrap()
+    from ripple.simulate import ledger
+    rows = ledger.trades(code=code)
+    if not rows:
+        console.print("[dim]暂无成交。[/dim]")
+        return
+    t = Table(show_header=True, header_style="bold")
+    t.add_column("时间"); t.add_column("方向"); t.add_column("代码")
+    t.add_column("价", justify="right"); t.add_column("量", justify="right")
+    t.add_column("费", justify="right"); t.add_column("已实现", justify="right")
+    t.add_column("advice")
+    for r in rows:
+        side = "[green]买[/green]" if r.side == "buy" else "[red]卖[/red]"
+        pnl = f"{r.realized_pnl:+,.2f}" if r.realized_pnl is not None else "-"
+        t.add_row(r.ts.strftime("%m-%d %H:%M"), side, r.ticker,
+                  f"{r.price:.2f}", str(r.qty), f"{r.fee:.2f}", pnl,
+                  (r.advice_id or "-"))
+    console.print(t)
+
+
+def _col(v) -> str:
+    if v is None:
+        return "-"
+    color = "green" if v >= 0 else "red"
+    return f"[{color}]{v:+.2f}[/{color}]"
+
+
 if __name__ == "__main__":
     app()
