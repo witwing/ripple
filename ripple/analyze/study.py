@@ -50,6 +50,7 @@ class StudyResult:
     advice: ParsedAdvice
     profile: Profile
     context: BriefContext
+    chart_path: Path | None = None
 
 
 def _safe(fn: Callable, *args, **kwargs):
@@ -274,6 +275,9 @@ def study(
     )
     brief_path.write_text(frontmatter + "\n" + markdown, encoding="utf-8")
 
+    log.info("[5b/6] Chart — 渲染可视化仪表盘")
+    chart_path = _render_chart(code, now, profile, peers, kline, index_kline)
+
     log.info("[6/6] Advise — 提取结论")
     parsed = parse_from_brief(markdown)
     advice_id = _new_id("adv")
@@ -295,8 +299,51 @@ def study(
     return StudyResult(
         brief_id=brief_id, brief_path=brief_path,
         advice_id=advice_id, advice=parsed,
-        profile=profile, context=ctx,
+        profile=profile, context=ctx, chart_path=chart_path,
     )
+
+
+def _render_chart(code, now, profile, peers, kline, index_kline):
+    """渲染仪表盘 PNG。失败不阻断 study，返回 None。"""
+    try:
+        import pandas as pd
+
+        from ripple.analyze.render import render_dashboard
+
+        dates = closes = idx_closes = None
+        # 近一年走势序列
+        if kline is not None and not kline.empty and "close" in kline.columns:
+            k = kline.copy()
+            try:
+                k["date"] = pd.to_datetime(k["date"])
+                one_year = pd.Timestamp(now.date()) - pd.Timedelta(days=365)
+                k = k[k["date"] >= one_year]
+            except Exception:
+                pass
+            closes = [float(c) for c in k["close"].tolist() if c == c]
+            dates = list(range(len(closes)))
+            # 对齐指数：取相同长度尾部
+            if index_kline is not None and not index_kline.empty and "close" in index_kline.columns:
+                ik = index_kline.copy()
+                try:
+                    ik["date"] = pd.to_datetime(ik["date"])
+                    ik = ik[ik["date"] >= one_year]
+                except Exception:
+                    pass
+                ic = [float(c) for c in ik["close"].tolist() if c == c]
+                # 截齐到相同长度
+                n = min(len(closes), len(ic))
+                if n > 1:
+                    closes = closes[-n:]
+                    idx_closes = ic[-n:]
+                    dates = list(range(n))
+        chart_dir = paths.briefs_dir() / now.strftime("%Y%m%d")
+        chart_dir.mkdir(parents=True, exist_ok=True)
+        out = chart_dir / f"{code}_{now.strftime('%H%M%S')}.png"
+        return render_dashboard(profile, peers, dates, closes, idx_closes, out_path=out)
+    except Exception as e:  # noqa: BLE001
+        log.warning(f"仪表盘渲染失败：{e}")
+        return None
 
 
 def _brief_frontmatter(*, brief_id: str, ticker: str, name: str | None,

@@ -358,6 +358,8 @@ def study_cmd(
 
     console.print()
     console.print(f"[green]✓[/green] Brief → {result.brief_path.relative_to(paths.home())}")
+    if result.chart_path:
+        console.print(f"[green]✓[/green] 图表 → {result.chart_path.relative_to(paths.home())}")
     p = result.profile
     tp = Table(show_header=False, box=None, pad_edge=False)
     tp.add_row("价格", f"{p.price if p.price is not None else '-'}"
