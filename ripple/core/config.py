@@ -53,6 +53,17 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "briefer": "claude-sonnet-5",
         "tagger": "claude-haiku-4-5-20251001",
     },
+    "monitor": {
+        "feishu_webhook": "",       # 飞书自定义机器人 webhook；空则不推送
+        "notify_empty": False,      # 无命中是否也推送
+        "dedup_days": 3,            # 同 code+规则 N 天内只提醒一次
+        "rules": {
+            "valuation_low_enabled": True,
+            "valuation_pct_threshold": 20.0,
+            "action_upgrade_enabled": True,
+            "action_min_confidence": 0.6,
+        },
+    },
 }
 
 

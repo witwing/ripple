@@ -166,6 +166,19 @@ class Review(Base):
     created: Mapped[datetime] = mapped_column(default=datetime.utcnow)
 
 
+class TriggerLog(Base):
+    """监控触发记录，用于去重（同一 code+rule N 天内只提醒一次）。"""
+    __tablename__ = "trigger_log"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    code: Mapped[str] = mapped_column(String(8), index=True)
+    rule: Mapped[str] = mapped_column(String(32), index=True)  # 触发规则 key
+    reason: Mapped[str | None] = mapped_column(Text)           # 人读的触发原因
+    advice_id: Mapped[str | None] = mapped_column(String(48))
+    notified: Mapped[bool] = mapped_column(default=False)
+    created: Mapped[datetime] = mapped_column(default=datetime.utcnow, index=True)
+
+
 # ---- 引擎与 Session ----
 _engine = None
 

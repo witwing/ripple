@@ -686,5 +686,58 @@ def report_list(code: str):
     console.print(f"[dim]目录：{rdir}[/dim]")
 
 
+# ---- scan ----
+@app.command("scan")
+def scan_cmd(
+    no_llm: bool = typer.Option(False, "--no-llm", help="dry-run，不调用 LLM"),
+    notify: bool = typer.Option(False, "--notify", help="命中后推送飞书"),
+    code: Optional[str] = typer.Option(None, "--code", help="只扫某支（默认全自选池）"),
+):
+    """批量扫描自选池，命中触发规则则汇总（可推送飞书）。"""
+    from ripple.llm import get_client, make_narrator
+    from ripple.monitor import notify as notifier
+    from ripple.monitor.scan import scan as run_scan
+
+    cfg = _bootstrap()
+    client = get_client(cfg, force_dry_run=no_llm)
+    narrator = None if client.name == "dry-run" else make_narrator(cfg, client)
+    dedup = int(cfg.get("monitor.dedup_days", 3))
+    codes = [code] if code else None
+
+    console.print("[dim]扫描中…[/dim]")
+    res = run_scan(cfg, narrator=narrator, dedup_days=dedup, codes=codes)
+
+    text = notifier.build_digest_text(res)
+    console.print()
+    console.print(text)
+    if res.errors:
+        console.print(f"[yellow]{len(res.errors)} 支出错[/yellow]")
+
+    if notify:
+        ok, _ = notifier.notify(cfg, res)
+        if ok:
+            console.print("[green]✓ 已推送飞书[/green]")
+        elif not cfg.get("monitor.feishu_webhook"):
+            console.print("[yellow]未配置 monitor.feishu_webhook，未推送[/yellow]")
+
+
+@app.command("scan-cron")
+def scan_cron(
+    time_hint: str = typer.Option("16:10", "--at", help="每个交易日运行时间 HH:MM"),
+):
+    """打印一行 crontab，工作日盘后自动扫描 + 推送。"""
+    import shutil
+    hh, mm = time_hint.split(":")
+    ripple_bin = shutil.which("ripple") or "ripple"
+    home = paths.home()
+    line = (f"{int(mm)} {int(hh)} * * 1-5 "
+            f"RIPPLE_HOME={home} {ripple_bin} scan --notify "
+            f">> {home}/scan.log 2>&1")
+    console.print("把下面这行加到 crontab（`crontab -e`）：\n")
+    console.print(f"[bold]{line}[/bold]")
+    console.print(f"\n[dim]工作日 {time_hint} 自动扫描自选池，命中推飞书，日志写 {home}/scan.log[/dim]")
+    console.print("[dim]先在 config.yaml 配好 monitor.feishu_webhook[/dim]")
+
+
 if __name__ == "__main__":
     app()
