@@ -358,9 +358,12 @@ def study_cmd(
         raise typer.Exit(1)
 
     console.print()
-    console.print(f"[green]✓[/green] Brief → {result.brief_path.relative_to(paths.home())}")
+    code_norm = Symbol.parse(code).code
+    rdir = paths.report_dir(code_norm)
+    console.print(f"[green]✓[/green] 报告目录 → {rdir}")
+    console.print(f"  最新文字：{rdir / 'latest.md'}")
     if result.chart_path:
-        console.print(f"[green]✓[/green] 图表 → {result.chart_path.relative_to(paths.home())}")
+        console.print(f"  最新图表：{rdir / 'latest.png'}")
     p = result.profile
     tp = Table(show_header=False, box=None, pad_edge=False)
     tp.add_row("价格", f"{p.price if p.price is not None else '-'}"
@@ -604,6 +607,83 @@ def universe_info():
     n = universe.count()
     console.print(f"本地名录：[bold]{n}[/bold] 支股票"
                   + ("（空，请 `ripple universe sync`）" if n == 0 else ""))
+
+
+# ---- report ----
+report_app = typer.Typer(help="研究报告产物")
+app.add_typer(report_app, name="report")
+
+
+@report_app.command("path")
+def report_path(
+    code: str,
+    kind: str = typer.Option("png", "--kind", help="png 或 md"),
+):
+    """打印某支票最新报告的绝对路径（配合 open $(ripple report path xxx) 用）。"""
+    _bootstrap()
+    try:
+        code = Symbol.parse(code).code
+    except ValueError as e:
+        console.print(f"[red]✗[/red] {e}")
+        raise typer.Exit(1)
+    f = paths.report_dir(code) / (f"latest.{kind}")
+    if not f.exists():
+        console.print(f"[yellow]无报告：{code}（先 ripple study {code}）[/yellow]")
+        raise typer.Exit(1)
+    # 只打印路径，方便 shell 捕获
+    print(f)
+
+
+@report_app.command("open")
+def report_open(
+    code: str,
+    kind: str = typer.Option("png", "--kind", help="png 或 md"),
+):
+    """用系统默认程序打开最新报告。"""
+    _bootstrap()
+    import subprocess
+    import sys
+    try:
+        code = Symbol.parse(code).code
+    except ValueError as e:
+        console.print(f"[red]✗[/red] {e}")
+        raise typer.Exit(1)
+    f = paths.report_dir(code) / (f"latest.{kind}")
+    if not f.exists():
+        console.print(f"[yellow]无报告：{code}（先 ripple study {code}）[/yellow]")
+        raise typer.Exit(1)
+    opener = "open" if sys.platform == "darwin" else "xdg-open"
+    try:
+        subprocess.Popen([opener, str(f)])
+        console.print(f"[green]✓[/green] 已打开 {f}")
+    except FileNotFoundError:
+        console.print(f"找不到 {opener}，路径：{f}")
+
+
+@report_app.command("list")
+def report_list(code: str):
+    """列出某支票的历史报告。"""
+    _bootstrap()
+    try:
+        code = Symbol.parse(code).code
+    except ValueError as e:
+        console.print(f"[red]✗[/red] {e}")
+        raise typer.Exit(1)
+    rdir = paths.report_dir(code)
+    if not rdir.exists():
+        console.print(f"[dim]{code} 还没有报告。[/dim]")
+        return
+    mds = sorted([f for f in rdir.glob("*.md") if f.stem != "latest"], reverse=True)
+    if not mds:
+        console.print(f"[dim]{code} 还没有报告。[/dim]")
+        return
+    t = Table(title=f"{code} 历史报告", show_header=True, header_style="bold")
+    t.add_column("时间"); t.add_column("文字"); t.add_column("图表")
+    for md in mds:
+        png = md.with_suffix(".png")
+        t.add_row(md.stem, md.name, png.name if png.exists() else "-")
+    console.print(t)
+    console.print(f"[dim]目录：{rdir}[/dim]")
 
 
 if __name__ == "__main__":

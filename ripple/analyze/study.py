@@ -76,7 +76,7 @@ def _new_id(prefix: str) -> str:
 
 
 def _brief_path(code: str, now: datetime) -> Path:
-    return paths.briefs_dir() / now.strftime("%Y%m%d") / f"{code}_{now.strftime('%H%M%S')}.md"
+    return paths.report_dir(code) / f"{now.strftime('%Y%m%d_%H%M%S')}.md"
 
 
 def _recall_query(name: str | None, industry: str | None, code: str) -> str:
@@ -277,7 +277,10 @@ def study(
         brief_id=brief_id, ticker=code, name=name, now=now,
         model=model_id, llm_mode=llm_mode, cited=[h.note_id for h in hits],
     )
-    brief_path.write_text(frontmatter + "\n" + markdown, encoding="utf-8")
+    full_text = frontmatter + "\n" + markdown
+    brief_path.write_text(full_text, encoding="utf-8")
+    # latest.md 永远指向最新一份
+    (paths.report_dir(code) / "latest.md").write_text(full_text, encoding="utf-8")
 
     log.info("[6/6] Advise — 提取结论")
     parsed = parse_from_brief(markdown)
@@ -347,11 +350,15 @@ def _render_chart(code, now, profile, peers, kline, index_kline,
                     closes = closes[-n:]
                     idx_closes = ic[-n:]
                     dates = list(range(n))
-        chart_dir = paths.briefs_dir() / now.strftime("%Y%m%d")
+        chart_dir = paths.report_dir(code)
         chart_dir.mkdir(parents=True, exist_ok=True)
-        out = chart_dir / f"{code}_{now.strftime('%H%M%S')}.png"
-        return render_dashboard(profile, peers, dates, closes, idx_closes,
-                                out_path=out, verdict=verdict, action_cn=action_cn)
+        out = chart_dir / f"{now.strftime('%Y%m%d_%H%M%S')}.png"
+        render_dashboard(profile, peers, dates, closes, idx_closes,
+                         out_path=out, verdict=verdict, action_cn=action_cn)
+        # latest.png 永远指向最新一份
+        import shutil
+        shutil.copyfile(out, chart_dir / "latest.png")
+        return out
     except Exception as e:  # noqa: BLE001
         log.warning(f"仪表盘渲染失败：{e}")
         return None

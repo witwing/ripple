@@ -20,7 +20,7 @@ def home() -> Path:
 def ensure_layout() -> Path:
     """确保数据目录结构存在，返回 home。首次运行时自动建。"""
     root = home()
-    for sub in ("notes", "briefs", "portfolios", "vectors", "cache"):
+    for sub in ("notes", "reports", "portfolios", "vectors", "cache"):
         (root / sub).mkdir(parents=True, exist_ok=True)
     return root
 
@@ -48,6 +48,16 @@ def cache_dir(provider: str | None = None) -> Path:
 
 def briefs_dir() -> Path:
     return home() / "briefs"
+
+
+def reports_dir() -> Path:
+    """按股票归档的报告根目录。"""
+    return home() / "reports"
+
+
+def report_dir(code: str) -> Path:
+    """某支股票的报告目录，如 reports/600519/。"""
+    return reports_dir() / code
 
 
 def portfolios_dir() -> Path:
