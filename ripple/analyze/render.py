@@ -265,19 +265,27 @@ def _peer_panel(ax, p: Profile, peers):
         ax.text(0.5, 0.42, "无同行数据可比", transform=ax.transAxes, color=INK2,
                 ha="center", fontsize=11)
         return
-    inset = ax.inset_axes([0.14, 0.16, 0.80, 0.62])
+    inset = ax.inset_axes([0.15, 0.18, 0.79, 0.58])
     inset.set_facecolor(CARD)
     for sp in inset.spines.values():
         sp.set_color(GRID)
     inset.tick_params(colors=INK2, labelsize=8)
     inset.grid(True, color=GRID, linewidth=0.6, alpha=0.6)
+    pes = [pe for pe, _, _, _ in pts]
+    roes = [roe for _, roe, _, _ in pts]
+    # 留出边距，避免点的名字标签贴边/压轴
+    pe_pad = max((max(pes) - min(pes)) * 0.18, 1.0)
+    roe_pad = max((max(roes) - min(roes)) * 0.22, 1.0)
+    inset.set_xlim(min(pes) - pe_pad, max(pes) + pe_pad)
+    inset.set_ylim(min(roes) - roe_pad, max(roes) + roe_pad * 1.4)  # 上方多留给标签
     for pe, roe, name, is_self in pts:
-        inset.scatter([pe], [roe], s=220 if is_self else 120,
+        inset.scatter([pe], [roe], s=200 if is_self else 110,
                       color=BLUE if is_self else GREY,
                       edgecolors=INK if is_self else "none", linewidths=1.3, zorder=3)
         inset.annotate(name, (pe, roe), fontsize=8,
                        color=INK if is_self else INK2,
-                       xytext=(0, 9), textcoords="offset points", ha="center")
+                       xytext=(0, 10), textcoords="offset points", ha="center",
+                       annotation_clip=False)
     inset.set_xlabel("← 便宜   贵 →   (PE)", color=INK2, fontsize=8.5)
     inset.set_ylabel("越能赚 ↑ (ROE%)", color=INK2, fontsize=8.5)
 
