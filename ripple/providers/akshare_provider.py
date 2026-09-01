@@ -94,9 +94,12 @@ class AkshareProvider:
                 if "变更日期" in ind.columns:
                     ind = ind.sort_values("变更日期", ascending=False)
                 row = ind.iloc[0]
-                sub = _clean(row.get("行业中类"))
-                if sub:
-                    industry = sub
+                # 行业中类最细；缺失时逐级回退到大类/次类
+                industry = (
+                    _clean(row.get("行业中类"))
+                    or _clean(row.get("行业大类"))
+                    or _clean(row.get("行业次类"))
+                )
                 # 如果 profile 那里没拿到 l1，用这里的补上
                 if not industry_l1:
                     industry_l1 = _clean(row.get("行业门类") or row.get("行业次类"))
