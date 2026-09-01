@@ -18,18 +18,22 @@ def _sample_ctx() -> BriefContext:
         recalled_notes=[{"id": "note_x", "excerpt": "渠道调研...", "score": 0.31,
                          "tickers": ["600519"], "tags": ["白酒"]}],
         user_stance="- note_x: 渠道调研…",
+        signals=[{"label": "估值", "light": "🟢", "note": "PE 处 5Y 40% 分位"},
+                 {"label": "成长", "light": "🟢", "note": "营收同比 +12.5%"}],
+        scores=[{"dim": "估值", "score": 3, "basis": "PE 5Y 分位 40%"},
+                {"dim": "成长", "score": 2, "basis": "营收同比 +12.5%"}],
     )
 
 
 def test_dryrun_brief_shape():
     md = render_dryrun_brief(_sample_ctx())
-    # 硬性结构（v0.6 加了三、资金面与共识 后编号后移）
-    assert "# 贵州茅台 (600519) 研究简报" in md
-    assert "## 一、事实速览" in md
-    assert "## 四、近期动态" in md
-    assert "## 五、我的历史观点" in md
-    assert "## 六、判断" in md
-    assert "## 七、结论" in md
+    # 美化版结构
+    assert "# 贵州茅台 (600519)" in md
+    assert "## 📊 信号面板" in md
+    assert "## 一、关键指标" in md
+    assert "## 六、投资价值评分" in md
+    assert "## 七、短/中/长期洞察" in md
+    assert "## 八、结论" in md
     # JSON 结论块存在
     assert "```json" in md
     assert '"action": "watch"' in md

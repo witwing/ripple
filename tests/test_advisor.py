@@ -11,7 +11,9 @@ LIVE = """# 贵州茅台 简报
   "size_pct": 5,
   "confidence": 0.72,
   "horizon_days": 60,
-  "rationale": "估值分位低 + 现金流稳定"
+  "rationale": "估值分位低 + 现金流稳定",
+  "horizon_views": {"short": "中性", "mid": "看多", "long": "看多"},
+  "value_scores": {"valuation": 4, "growth": 2, "quality": 5, "capital": 3}
 }
 ```
 """
@@ -46,6 +48,20 @@ def test_parse_live():
     assert a.confidence == 0.72
     assert a.horizon_days == 60
     assert "估值分位低" in a.rationale
+    # 新增字段
+    assert a.horizon_views == {"short": "中性", "mid": "看多", "long": "看多"}
+    assert a.value_scores == {"valuation": 4, "growth": 2, "quality": 5, "capital": 3}
+
+
+def test_parse_without_optional_fields():
+    md = """## 结论
+```json
+{"action":"hold","size_pct":10,"confidence":0.5,"horizon_days":30,"rationale":"x"}
+```"""
+    a = parse_from_brief(md)
+    assert a.action == "hold"
+    assert a.horizon_views is None
+    assert a.value_scores is None
 
 
 def test_parse_malformed_falls_back():

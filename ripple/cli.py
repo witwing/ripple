@@ -376,6 +376,22 @@ def study_cmd(
         f"[bold]结论[/bold]  action={a.action}  size={a.size_pct}%  "
         f"conf={a.confidence:.2f}  horizon={a.horizon_days}d"
     )
+    if a.horizon_views:
+        hv = a.horizon_views
+        console.print(
+            f"[bold]周期[/bold]  短期 {hv.get('short','-')}  ·  "
+            f"中期 {hv.get('mid','-')}  ·  长期 {hv.get('long','-')}"
+        )
+    if a.value_scores:
+        vs = a.value_scores
+        def _stars(n): return "★" * int(n) + "☆" * (5 - int(n))
+        parts = []
+        for key, label in [("valuation", "估值"), ("growth", "成长"),
+                           ("quality", "质量"), ("capital", "资金")]:
+            if key in vs:
+                parts.append(f"{label} {_stars(vs[key])}")
+        if parts:
+            console.print("[bold]评分[/bold]  " + "   ".join(parts))
     console.print(f"[dim]{a.rationale}[/dim]")
     console.print(f"[dim]advice_id: {result.advice_id}[/dim]")
 

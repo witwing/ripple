@@ -26,6 +26,8 @@ def _render_prompt(template: str, ctx: BriefContext) -> str:
             "capital_summary": ctx.capital_summary,
             "consensus_summary": ctx.consensus_summary,
             "peers": ctx.peers,
+            "signals": ctx.signals,
+            "scores": ctx.scores,
             "announcements": ctx.announcements,
             "news": ctx.news,
             "recalled_notes": ctx.recalled_notes,

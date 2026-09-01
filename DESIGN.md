@@ -18,6 +18,7 @@
 | v0.4 | 2026-08-29 | M2 落地前的补充：`study` 完整流程细化、Brief markdown schema、Advice 结构、LLM 适配层契约、`--no-llm` dry-run 语义 |
 | v0.5 | 2026-08-30 | 数据聚合第一批：新增 metrics/index 两个 capability；profile 从 12 字段扩到 27（补 ROE/毛利率/净利率/负债率/OCF比+相对沪深300）；同行对比表；briefer prompt 加同行段与"善用相对量"约束 |
 | v0.6 | 2026-08-30 | 数据聚合第二批：新增 capital/institution/research 三个 capability；profile 扩到 38 字段（+融资余额、股东户数环比、公募加减仓、卖方共识 EPS/PE 中位、评级分布）；BriefContext + capital_summary + consensus_summary；briefer 7 段结构 |
+| v0.7 | 2026-09-01 | 报告美化：新增 dashboard.py（信号灯🟢🟡🔴 + 分位条 + 四维星级评分，纯规则）；简报改为 8-9 段结构（信号面板/关键指标/同行/资金面/动态/历史观点/价值评分/短中长期洞察/价值分析/结论）；结论 JSON 扩展 horizon_views + value_scores；CLI 展示周期观点与星级评分 |
 
 ---
 

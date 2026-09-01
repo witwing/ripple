@@ -16,6 +16,8 @@ class ParsedAdvice:
     confidence: float
     horizon_days: int
     rationale: str
+    horizon_views: dict | None = None   # {"short":"看多","mid":...,"long":...}
+    value_scores: dict | None = None    # {"valuation":4,"growth":2,...}
 
 
 _JSON_BLOCK = re.compile(r"```json\s*(\{.*?\})\s*```", re.DOTALL)
@@ -44,7 +46,31 @@ def parse_from_brief(markdown: str) -> ParsedAdvice:
         confidence=_clamp(_to_float(data.get("confidence")), 0, 1, default=0.0),
         horizon_days=int(_to_float(data.get("horizon_days")) or 30),
         rationale=str(data.get("rationale", ""))[:512],
+        horizon_views=_parse_horizon_views(data.get("horizon_views")),
+        value_scores=_parse_value_scores(data.get("value_scores")),
     )
+
+
+def _parse_horizon_views(raw) -> dict | None:
+    if not isinstance(raw, dict):
+        return None
+    out = {}
+    for k in ("short", "mid", "long"):
+        v = raw.get(k)
+        if v is not None:
+            out[k] = str(v)[:16]
+    return out or None
+
+
+def _parse_value_scores(raw) -> dict | None:
+    if not isinstance(raw, dict):
+        return None
+    out = {}
+    for k in ("valuation", "growth", "quality", "capital"):
+        v = _to_float(raw.get(k))
+        if v is not None:
+            out[k] = int(_clamp(v, 0, 5, default=0))
+    return out or None
 
 
 def _fallback(reason: str) -> ParsedAdvice:

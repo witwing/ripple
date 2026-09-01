@@ -5,6 +5,13 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
+from ripple.analyze.dashboard import (
+    build_scores,
+    build_signals,
+    pct_bar,
+    score_stars,
+    signal_bar,
+)
 from ripple.analyze.profile import PeerRow, Profile
 from ripple.notes.search import Hit
 from ripple.providers.base import Announcement, NewsItem
@@ -23,6 +30,8 @@ class BriefContext:
     relative_summary: str = ""
     capital_summary: str = ""    # 资金面 + 筹码变化的一行摘要
     consensus_summary: str = ""  # 卖方共识的一行摘要
+    signals: list[dict] = field(default_factory=list)   # 信号灯 [{label, light, note}]
+    scores: list[dict] = field(default_factory=list)    # 维度打分 [{dim, score, basis}]
 
 
 def _summarize_kline(profile: Profile) -> str:
@@ -132,100 +141,139 @@ def build_context(
             }
             for p in (peers or [])
         ],
+        signals=[{"label": s.label, "light": s.light, "note": s.note}
+                 for s in build_signals(profile)],
+        scores=[{"dim": d.dim, "score": d.score, "basis": d.basis}
+                for d in build_scores(profile)],
     )
 
 
 def render_dryrun_brief(ctx: BriefContext) -> str:
-    """无 LLM 时用模板渲染出可读 markdown。"""
+    """无 LLM 时用模板渲染出美化的 markdown 报告。"""
     p = ctx.profile
-    lines: list[str] = []
-    lines.append(f"# {ctx.ticker.get('name') or ctx.ticker['code']} ({ctx.ticker['code']}) 研究简报")
-    if ctx.ticker.get("industry"):
-        lines.append(f"_{ctx.ticker['industry']}_")
-    lines.append("")
+    L: list[str] = []
 
-    lines.append("## 一、事实速览")
-    lines.append(f"- 最新价：{_fmt(p.get('price'))}  ·  日内 {_fmt_pct(p.get('price_change_1d_pct'))}")
-    lines.append(f"- 近期走势：{ctx.recent_kline_summary}")
+    # ── 标题 ──
+    L.append(f"# {ctx.ticker.get('name') or ctx.ticker['code']} ({ctx.ticker['code']})")
+    sub = ctx.ticker.get("industry") or ""
+    L.append(f"> {sub}  ·  研究简报（dry-run）")
+    L.append("")
+
+    # ── 信号面板 ──
+    if ctx.signals:
+        L.append("## 📊 信号面板")
+        L.append("")
+        L.append("  ".join(f"{s['light']} {s['label']}" for s in ctx.signals))
+        L.append("")
+        L.append("| 维度 | 信号 | 说明 |")
+        L.append("|---|:---:|---|")
+        for s in ctx.signals:
+            L.append(f"| {s['label']} | {s['light']} | {s['note']} |")
+        L.append("")
+
+    # ── 关键指标 + 分位条 ──
+    L.append("## 一、关键指标")
+    L.append("")
+    L.append("| 指标 | 数值 | 5Y 分位 |")
+    L.append("|---|---:|---|")
+    L.append(f"| PE-TTM | {_fmt(p.get('pe_ttm'))} | {_bar(p.get('pe_pct_5y'))} |")
+    L.append(f"| PB | {_fmt(p.get('pb'))} | {_bar(p.get('pb_pct_5y'))} |")
+    L.append(f"| ROE | {_fmt(p.get('roe'), suffix='%')} | — |")
+    L.append(f"| 毛利率 | {_fmt(p.get('gross_margin'), suffix='%')} | — |")
+    L.append(f"| 净利率 | {_fmt(p.get('net_margin'), suffix='%')} | — |")
+    L.append(f"| 经营现金流/营收 | {_fmt(p.get('ocf_to_revenue'))} | — |")
+    L.append(f"| 资产负债率 | {_fmt(p.get('debt_ratio'), suffix='%')} | — |")
+    L.append("")
+    L.append(f"- **价格**：{_fmt(p.get('price'))}  ·  日内 {_fmt_pct(p.get('price_change_1d_pct'))}")
+    L.append(f"- **走势**：{ctx.recent_kline_summary}")
     if ctx.relative_summary:
-        lines.append(f"- 相对沪深300：{ctx.relative_summary}")
-    lines.append(
-        f"- 估值：PE_TTM {_fmt(p.get('pe_ttm'))}（5Y 分位 {_fmt(p.get('pe_pct_5y'), suffix='%')}）"
-        f"  ·  PB {_fmt(p.get('pb'))}（5Y 分位 {_fmt(p.get('pb_pct_5y'), suffix='%')}）"
-        f"  ·  股息 {_fmt(p.get('dv_ratio'), suffix='%')}"
-    )
-    lines.append(
-        f"- 盈利：ROE {_fmt(p.get('roe'), suffix='%')}"
-        f"  ·  毛利率 {_fmt(p.get('gross_margin'), suffix='%')}"
-        f"  ·  净利率 {_fmt(p.get('net_margin'), suffix='%')}"
-    )
-    lines.append(
-        f"- 质量：经营现金流/营收 {_fmt(p.get('ocf_to_revenue'))}"
-        f"  ·  资产负债率 {_fmt(p.get('debt_ratio'), suffix='%')}"
-    )
-    lines.append(
-        f"- 成长：营收同比 {_fmt_pct(p.get('revenue_yoy_pct'))}"
+        L.append(f"- **相对沪深300**：{ctx.relative_summary}")
+    L.append(
+        f"- **成长**：营收同比 {_fmt_pct(p.get('revenue_yoy_pct'))}"
         f"  ·  净利同比 {_fmt_pct(p.get('net_profit_yoy_pct'))}"
-        f"  ·  ROE 同比变化 {_fmt_pp(p.get('roe_yoy_change_pp'))}"
+        f"  ·  ROE 同比 {_fmt_pp(p.get('roe_yoy_change_pp'))}"
     )
-    lines.append("")
+    L.append("")
 
+    # ── 同行对比 ──
     if ctx.peers:
-        lines.append("## 二、同行对比")
-        lines.append("")
-        lines.append("| 代码 | 名称 | PE_TTM | PB | ROE | 近1年涨跌 |")
-        lines.append("|---|---|---:|---:|---:|---:|")
+        L.append("## 二、同行对比")
+        L.append("")
+        L.append("| 代码 | 名称 | PE_TTM | PB | ROE | 近1年 |")
+        L.append("|---|---|---:|---:|---:|---:|")
         for row in ctx.peers:
-            lines.append(
+            L.append(
                 f"| {row['code']} | {row.get('name') or '-'} "
                 f"| {_fmt(row.get('pe_ttm'))} | {_fmt(row.get('pb'))} "
                 f"| {_fmt(row.get('roe'), suffix='%')} "
                 f"| {_fmt_pct(row.get('price_change_1y_pct'))} |"
             )
-        lines.append("")
+        L.append("")
 
+    # ── 资金面与共识 ──
     if ctx.capital_summary or ctx.consensus_summary:
-        lines.append("## 三、资金面与共识")
+        L.append("## 三、资金面与共识")
         if ctx.capital_summary:
-            lines.append(f"- **资金/筹码**：{ctx.capital_summary}")
+            L.append(f"- **资金/筹码**：{ctx.capital_summary}")
         if ctx.consensus_summary:
-            lines.append(f"- **卖方共识**：{ctx.consensus_summary}")
-        lines.append("")
+            L.append(f"- **卖方共识**：{ctx.consensus_summary}")
+        L.append("")
 
-    lines.append("## 四、近期动态")
+    # ── 近期动态 ──
+    L.append("## 四、近期动态")
     if ctx.announcements:
-        lines.append("**公告**")
-        for a in ctx.announcements:
-            lines.append(f"- {a['date']}  {a['title']}")
+        L.append("**公告**")
+        for a in ctx.announcements[:8]:
+            L.append(f"- {a['date']}  {a['title']}")
     if ctx.news:
-        lines.append("")
-        lines.append("**新闻**")
-        for n in ctx.news:
-            lines.append(f"- {n['date']}  [{n.get('source', '')}] {n['title']}")
+        L.append("")
+        L.append("**新闻**")
+        for n in ctx.news[:8]:
+            L.append(f"- {n['date']}  [{n.get('source', '')}] {n['title']}")
     if not ctx.announcements and not ctx.news:
-        lines.append("（暂无公告与新闻）")
-    lines.append("")
+        L.append("（暂无公告与新闻）")
+    L.append("")
 
-    lines.append("## 五、我的历史观点")
-    lines.append(ctx.user_stance)
-    lines.append("")
+    # ── 历史观点 ──
+    L.append("## 五、我的历史观点")
+    L.append(ctx.user_stance)
+    L.append("")
 
-    lines.append("## 六、判断")
-    lines.append("_dry-run 模式：无 LLM 综合推理。以下仅为客观事实拼装。_")
-    lines.append("")
+    # ── 价值评分 ──
+    if ctx.scores:
+        L.append("## 六、投资价值评分")
+        L.append("")
+        L.append("| 维度 | 评分 | 依据 |")
+        L.append("|---|:---:|---|")
+        for d in ctx.scores:
+            L.append(f"| {d['dim']} | {score_stars(d['score'])} | {d['basis']} |")
+        L.append("")
 
-    lines.append("## 七、结论")
-    lines.append("")
-    lines.append("```json")
-    lines.append('{')
-    lines.append('  "action": "watch",')
-    lines.append('  "size_pct": 0,')
-    lines.append('  "confidence": 0.0,')
-    lines.append('  "horizon_days": 30,')
-    lines.append('  "rationale": "dry-run，未调用 LLM"')
-    lines.append('}')
-    lines.append("```")
-    return "\n".join(lines)
+    # ── 短中长期洞察（dry-run 占位）──
+    L.append("## 七、短/中/长期洞察")
+    L.append("_dry-run 模式：无 LLM 推理。以下为结构占位。_")
+    L.append("- **短期（1-3 月）**：见信号面板")
+    L.append("- **中期（6-12 月）**：见成长与资金面")
+    L.append("- **长期（1-3 年）**：见质量与估值分位")
+    L.append("")
+
+    # ── 结论 ──
+    L.append("## 八、结论")
+    L.append("")
+    L.append("```json")
+    L.append('{')
+    L.append('  "action": "watch",')
+    L.append('  "size_pct": 0,')
+    L.append('  "confidence": 0.0,')
+    L.append('  "horizon_days": 30,')
+    L.append('  "rationale": "dry-run，未调用 LLM"')
+    L.append('}')
+    L.append("```")
+    return "\n".join(L)
+
+
+def _bar(pct) -> str:
+    return pct_bar(pct if isinstance(pct, (int, float)) else None)
 
 
 def _fmt(v, suffix: str = "") -> str:
