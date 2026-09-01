@@ -338,6 +338,7 @@ def study_cmd(
     code: str = typer.Argument(..., help="6 位 A 股代码"),
     refresh: bool = typer.Option(False, "--refresh", help="绕过缓存重新拉数据"),
     no_llm: bool = typer.Option(False, "--no-llm", help="dry-run 模式，不调用 LLM"),
+    digest: bool = typer.Option(True, "--digest/--no-digest", help="打印判断精炼（图配文的文字层）"),
 ):
     """深挖单票：拉数据 → 召回笔记 → 生成 Brief + Advice。"""
     from ripple.analyze.study import study as run_study
@@ -396,6 +397,12 @@ def study_cmd(
             console.print("[bold]评分[/bold]  " + "   ".join(parts))
     console.print(f"[dim]{a.rationale}[/dim]")
     console.print(f"[dim]advice_id: {result.advice_id}[/dim]")
+
+    if digest and result.digest:
+        # 标准输出：图 + 判断精炼。打印判断层文字（不重复上面的数据表）
+        console.print()
+        console.rule("[bold]判断精炼[/bold]", style="dim")
+        console.print(result.digest)
 
 
 if __name__ == "__main__":

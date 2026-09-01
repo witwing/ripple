@@ -20,6 +20,7 @@
 | v0.6 | 2026-08-30 | 数据聚合第二批：新增 capital/institution/research 三个 capability；profile 扩到 38 字段（+融资余额、股东户数环比、公募加减仓、卖方共识 EPS/PE 中位、评级分布）；BriefContext + capital_summary + consensus_summary；briefer 7 段结构 |
 | v0.7 | 2026-09-01 | 报告美化：新增 dashboard.py（信号灯🟢🟡🔴 + 分位条 + 四维星级评分，纯规则）；简报改为 8-9 段结构（信号面板/关键指标/同行/资金面/动态/历史观点/价值评分/短中长期洞察/价值分析/结论）；结论 JSON 扩展 horizon_views + value_scores；CLI 展示周期观点与星级评分 |
 | v0.8 | 2026-09-01 | 可视化仪表盘：新增 render.py（matplotlib PNG，深色主题 + Noto CJK）；study 生成一张图表——信号灯行 / 估值分位条 / 四维评分点阵 / 同行 ROE×PE 散点 / 近一年 vs 沪深300 归一化走势；图表与简报同目录 |
+| v0.9 | 2026-09-01 | 图文分工固化：新增 digest.py（只抽判断章节：动作条+周期观点+短中长期洞察+价值分析，不重复图里的数据）。标准输出 = 图(事实层) + 判断精炼(判断层)，两者不冗余。CLI study 默认打印判断精炼（--no-digest 关闭） |
 
 ---
 
