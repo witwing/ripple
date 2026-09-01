@@ -253,6 +253,7 @@ def study(
         income=income, metrics=metrics, index_kline=index_kline,
         margin=margin, shareholders=shareholders,
         fund_holdings=fund_holdings, consensus=consensus,
+        list_date=(meta.list_date if meta else None),
     )
 
     log.info("[4b/6] Peers — 装同行对比表")

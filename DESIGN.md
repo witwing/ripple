@@ -23,6 +23,7 @@
 | v0.9 | 2026-09-01 | 图文分工固化：新增 digest.py（只抽判断章节：动作条+周期观点+短中长期洞察+价值分析，不重复图里的数据）。标准输出 = 图(事实层) + 判断精炼(判断层)，两者不冗余。CLI study 默认打印判断精炼（--no-digest 关闭） |
 | v0.10 | 2026-09-01 | M3 模拟组合：portfolio/position/trade/nav_point 模型；A股交易规则（整手+佣金+印花税+过户费）；移动加权成本 + 已实现/浮动盈亏；mark-to-market 净值 vs 沪深300；CLI sim init/buy/sell/status/report/history；见 §8b |
 | v0.11 | 2026-09-01 | 股票名录：新增 data/universe.py + universe_stock 表；从交易所名单（上交所主板+科创/深交所主板+创业板）同步 5200+ 支，pypinyin 简拼；`ripple universe sync/search/info` 支持代码/名称/拼音搜索 |
+| v0.12 | 2026-09-01 | 估值信号防失真：PE>100 强制红灯"绝对高估"、PE<0 红灯"亏损"、上市不足3年黄灯"5Y分位不可信"；投资价值评分同步压分。宇树科技(688836)实测触发（PE 391x）。Profile 加 list_date 字段 |
 
 ---
 

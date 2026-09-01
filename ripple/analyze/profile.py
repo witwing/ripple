@@ -30,6 +30,7 @@ class Profile:
     code: str
     name: str | None = None
     industry: str | None = None
+    list_date: str | None = None   # YYYY-MM-DD，用于判断是否次新股（分位是否可信）
 
     # 价格与走势
     price: float | None = None
@@ -192,9 +193,10 @@ def build_profile(
     shareholders: ShareholderSnapshot | None = None,
     fund_holdings: FundHoldingSummary | None = None,
     consensus: ResearchConsensus | None = None,
+    list_date: str | None = None,
 ) -> Profile:
     """装 Profile。所有输入允许为 None，缺失字段留 None。"""
-    p = Profile(code=code, name=name, industry=industry)
+    p = Profile(code=code, name=name, industry=industry, list_date=list_date)
 
     if quote:
         p.price = quote.price

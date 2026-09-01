@@ -6,8 +6,25 @@ LLM 只负责"洞察"与"价值分析"的文字，数据可视化由这里生成
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date, datetime
 
 from ripple.analyze.profile import Profile
+
+
+def _valuation_percentile_unreliable(p: Profile) -> bool:
+    """判断 PE/PB 的 5Y 分位是否不可信：上市不足 3 年样本不足。"""
+    if not p.list_date:
+        return False
+    for fmt in ("%Y-%m-%d", "%Y%m%d", "%Y/%m/%d"):
+        try:
+            d = datetime.strptime(p.list_date, fmt).date()
+            break
+        except ValueError:
+            continue
+    else:
+        return False
+    days_listed = (date.today() - d).days
+    return days_listed < 365 * 3
 
 
 # ---- 信号灯 ----
@@ -51,8 +68,24 @@ def build_signals(p: Profile) -> list[Signal]:
     """从 profile 生成一组信号灯。"""
     signals: list[Signal] = []
 
-    # 估值（PE 5Y 分位，越低越好）
-    if p.pe_pct_5y is not None:
+    # 估值信号
+    unreliable = _valuation_percentile_unreliable(p)
+    if p.pe_ttm is not None and p.pe_ttm > 100:
+        # 绝对高估值：分位再低也不算便宜，强制红灯
+        signals.append(Signal(
+            "估值", RED,
+            f"PE {p.pe_ttm:.0f}x 绝对高估" + ("（次新，分位不可信）" if unreliable else ""),
+        ))
+    elif p.pe_ttm is not None and p.pe_ttm < 0:
+        # 亏损无 PE
+        signals.append(Signal("估值", RED, f"PE {p.pe_ttm:.0f}x（亏损）"))
+    elif unreliable and p.pe_ttm is not None:
+        # 次新股：5Y 分位样本不足，标黄提示
+        signals.append(Signal(
+            "估值", YELLOW,
+            f"PE {p.pe_ttm:.0f}x（次新，5Y 分位不可信）",
+        ))
+    elif p.pe_pct_5y is not None:
         signals.append(Signal(
             "估值", _light_by_threshold(p.pe_pct_5y, good_below=30, bad_above=70),
             f"PE 处 5Y {p.pe_pct_5y:.0f}% 分位",
@@ -137,8 +170,15 @@ def build_scores(p: Profile) -> list[DimScore]:
     """四维打分（0-5），纯规则。给 LLM 和用户一个量化锚点。"""
     scores: list[DimScore] = []
 
-    # 估值（分位越低分越高）
-    if p.pe_pct_5y is not None:
+    # 估值（分位越低分越高；但绝对高估值 / 次新分位不可信要压分）
+    if p.pe_ttm is not None and p.pe_ttm > 100:
+        scores.append(DimScore("估值", _clip5(1), f"PE {p.pe_ttm:.0f}x 绝对高估"))
+    elif p.pe_ttm is not None and p.pe_ttm < 0:
+        scores.append(DimScore("估值", 0, f"PE {p.pe_ttm:.0f}x（亏损）"))
+    elif _valuation_percentile_unreliable(p) and p.pe_ttm is not None:
+        # 次新股分位不可信，给中性 2 分并注明
+        scores.append(DimScore("估值", 2, f"PE {p.pe_ttm:.0f}x（次新，分位不可信）"))
+    elif p.pe_pct_5y is not None:
         s = _clip5(5 - p.pe_pct_5y / 20)  # 0%→5, 100%→0
         scores.append(DimScore("估值", s, f"PE 5Y 分位 {p.pe_pct_5y:.0f}%"))
 
