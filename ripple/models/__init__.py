@@ -36,6 +36,20 @@ class Watch(Base):
     note: Mapped[str | None] = mapped_column(Text)
 
 
+class UniverseStock(Base):
+    """全市场股票名录（可搜索）。由 `ripple universe sync` 从交易所名单刷新。"""
+    __tablename__ = "universe_stock"
+
+    code: Mapped[str] = mapped_column(String(8), primary_key=True)
+    name: Mapped[str | None] = mapped_column(String(64), index=True)
+    pinyin: Mapped[str | None] = mapped_column(String(64), index=True)  # 简拼，如 gzmt
+    exchange: Mapped[str | None] = mapped_column(String(4))
+    board: Mapped[str | None] = mapped_column(String(16))
+    industry: Mapped[str | None] = mapped_column(String(64))
+    list_date: Mapped[str | None] = mapped_column(String(10))
+    updated_at: Mapped[datetime] = mapped_column(default=datetime.utcnow)
+
+
 class Snapshot(Base):
     """时间序列快照：任何一次对外抓的原始数据都可以落这里。"""
     __tablename__ = "snapshot"

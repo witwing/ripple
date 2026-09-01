@@ -555,5 +555,56 @@ def _col(v) -> str:
     return f"[{color}]{v:+.2f}[/{color}]"
 
 
+# ---- universe ----
+universe_app = typer.Typer(help="全市场股票名录")
+app.add_typer(universe_app, name="universe")
+
+
+@universe_app.command("sync")
+def universe_sync():
+    """从交易所名单刷新本地股票名录。"""
+    _bootstrap()
+    from ripple.data import universe
+    console.print("[dim]拉取交易所名单中…[/dim]")
+    n, notes = universe.sync()
+    console.print(f"[green]✓[/green] 名录已刷新，共 [bold]{n}[/bold] 支")
+    for note in notes:
+        console.print(f"  · {note}")
+
+
+@universe_app.command("search")
+def universe_search(
+    query: str = typer.Argument(..., help="代码 / 名称 / 拼音简拼（如 gzmt）"),
+    limit: int = typer.Option(20, "--limit"),
+):
+    """搜索股票。"""
+    _bootstrap()
+    from ripple.data import universe
+    if universe.count() == 0:
+        console.print("[yellow]名录为空，请先 `ripple universe sync`。[/yellow]")
+        raise typer.Exit(1)
+    rows = universe.search(query, limit=limit)
+    if not rows:
+        console.print(f"[dim]没搜到「{query}」。[/dim]")
+        return
+    t = Table(show_header=True, header_style="bold")
+    t.add_column("代码"); t.add_column("名称"); t.add_column("拼音")
+    t.add_column("交易所"); t.add_column("板块"); t.add_column("行业")
+    for r in rows:
+        t.add_row(r.code, r.name or "-", r.pinyin or "-",
+                  r.exchange or "-", r.board or "-", r.industry or "-")
+    console.print(t)
+
+
+@universe_app.command("info")
+def universe_info():
+    """名录统计。"""
+    _bootstrap()
+    from ripple.data import universe
+    n = universe.count()
+    console.print(f"本地名录：[bold]{n}[/bold] 支股票"
+                  + ("（空，请 `ripple universe sync`）" if n == 0 else ""))
+
+
 if __name__ == "__main__":
     app()
