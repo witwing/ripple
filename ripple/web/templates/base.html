@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Ripple 观澜{% endblock %}</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header>
+    <span class="logo">Ripple · 观澜</span>
+    <nav>
+      <a href="/">自选池</a>
+      <a href="/portfolio">模拟组合</a>
+      <a href="/monitor">监控</a>
+      <a href="/api/docs" target="_blank">API</a>
+    </nav>
+  </header>
+  <main>{% block body %}{% endblock %}</main>
+  <div class="toast" id="toast"></div>
+  <script>
+    function toast(msg){const t=document.getElementById('toast');t.textContent=msg;
+      t.style.display='block';setTimeout(()=>t.style.display='none',3000);}
+    async function pollJob(id, done){
+      const r=await fetch('/api/jobs/'+id); const j=await r.json();
+      if(j.status==='done'){done(null,j);}
+      else if(j.status==='error'){done(j.error,j);}
+      else{setTimeout(()=>pollJob(id,done),2000);}
+    }
+  </script>
+  {% block script %}{% endblock %}
+</body>
+</html>

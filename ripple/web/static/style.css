@@ -1,0 +1,41 @@
+:root{
+  --bg:#16181d; --card:#1e2128; --ink:#f2f3f5; --ink2:#9aa0aa; --ink3:#6b7280;
+  --grid:#2c3038; --blue:#3987e5; --good:#1faf6f; --warn:#e0a300; --crit:#e05753;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);
+  font-family:"PingFang SC","Microsoft YaHei",-apple-system,system-ui,sans-serif;font-size:14px}
+a{color:var(--blue);text-decoration:none}
+header{display:flex;align-items:center;gap:24px;padding:14px 24px;border-bottom:1px solid var(--grid)}
+header .logo{font-size:18px;font-weight:700}
+header nav a{color:var(--ink2);margin-right:18px}
+header nav a:hover,header nav a.active{color:var(--ink)}
+main{padding:22px 24px;max-width:1180px;margin:0 auto}
+h1{font-size:20px;margin:0 0 16px}
+h2{font-size:15px;color:var(--ink2);margin:22px 0 10px;font-weight:600}
+.card{background:var(--card);border-radius:10px;padding:16px 18px;margin-bottom:16px}
+table{width:100%;border-collapse:collapse}
+th,td{text-align:left;padding:9px 10px;border-bottom:1px solid var(--grid);font-size:13px}
+th{color:var(--ink3);font-weight:600}
+.pos{color:var(--good)} .neg{color:var(--crit)} .muted{color:var(--ink3)}
+.tag{display:inline-block;padding:1px 8px;border-radius:10px;font-size:12px;background:var(--grid);color:var(--ink2)}
+.tag.buy{background:rgba(31,175,111,.18);color:var(--good)}
+.tag.sell{background:rgba(224,87,83,.18);color:var(--crit)}
+.tag.hold{background:rgba(224,163,0,.18);color:var(--warn)}
+.tag.watch{background:var(--grid);color:var(--ink2)}
+button,.btn{background:var(--blue);color:#fff;border:none;border-radius:7px;
+  padding:7px 14px;font-size:13px;cursor:pointer}
+button.ghost,.btn.ghost{background:var(--grid);color:var(--ink)}
+button:hover{opacity:.9}
+input,select{background:#12141a;border:1px solid var(--grid);color:var(--ink);
+  border-radius:7px;padding:7px 10px;font-size:13px}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.searchbox{position:relative;flex:1;max-width:420px}
+.results{position:absolute;top:40px;left:0;right:0;background:var(--card);
+  border:1px solid var(--grid);border-radius:8px;z-index:9;max-height:320px;overflow:auto}
+.results div{padding:8px 12px;cursor:pointer;border-bottom:1px solid var(--grid)}
+.results div:hover{background:#262a33}
+.chart{width:100%;border-radius:10px;border:1px solid var(--grid)}
+pre.digest{white-space:pre-wrap;line-height:1.7;font-family:inherit;font-size:13.5px}
+.toast{position:fixed;bottom:24px;right:24px;background:var(--card);
+  border:1px solid var(--grid);padding:12px 16px;border-radius:8px;display:none}

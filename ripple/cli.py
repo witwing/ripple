@@ -739,5 +739,22 @@ def scan_cron(
     console.print("[dim]先在 config.yaml 配好 monitor.feishu_webhook[/dim]")
 
 
+@app.command("serve")
+def serve_cmd(
+    port: int = typer.Option(8000, "--port"),
+    host: str = typer.Option("127.0.0.1", "--host"),
+):
+    """启动 Web UI（自选/个股/组合/监控）。"""
+    _bootstrap()
+    try:
+        import uvicorn
+        from ripple.web.app import create_app
+    except ImportError:
+        console.print("[red]缺 web 依赖。装：pip install 'ripple[web]' 或 fastapi uvicorn jinja2[/red]")
+        raise typer.Exit(1)
+    console.print(f"[green]Ripple Web[/green] → http://{host}:{port}")
+    uvicorn.run(create_app(), host=host, port=port, log_level="info")
+
+
 if __name__ == "__main__":
     app()

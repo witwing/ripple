@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}{{ data.name or data.code }} · Ripple{% endblock %}
+{% block body %}
+<h1>{{ data.name or data.code }} <span class="muted">{{ data.code }} · {{ data.industry or '—' }}</span></h1>
+<div class="row" style="margin-bottom:16px">
+  <button onclick="study()">重新分析</button>
+  <a class="btn ghost" href="/">← 返回自选池</a>
+</div>
+
+{% if data.has_latest %}
+<div class="card">
+  <img class="chart" src="/report/{{ data.code }}/latest.png" alt="仪表盘">
+</div>
+<div class="card">
+  <h2>判断精炼</h2>
+  <pre class="digest">{{ data.latest_digest }}</pre>
+</div>
+{% else %}
+<div class="card"><p class="muted">还没有报告，点"重新分析"生成。</p></div>
+{% endif %}
+
+{% if data.reports %}
+<h2>历史报告</h2>
+<div class="card">
+  <table>
+    <thead><tr><th>时间</th><th>图表</th><th>文字</th></tr></thead>
+    <tbody>
+    {% for r in data.reports %}
+      <tr>
+        <td>{{ r.ts }}</td>
+        <td>{% if r.png %}<a href="/report/{{ data.code }}/{{ r.png }}" target="_blank">看图</a>{% else %}-{% endif %}</td>
+        <td><a href="/report/{{ data.code }}/{{ r.md }}" target="_blank">看文字</a></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block script %}
+<script>
+async function study(){
+  toast('开始分析…');
+  const r=await fetch('/api/study/{{ data.code }}',{method:'POST'});
+  const {job_id}=await r.json();
+  pollJob(job_id,(err,j)=>{
+    if(err){toast('分析失败：'+err);}
+    else{toast('分析完成，刷新中…');setTimeout(()=>location.reload(),1200);}
+  });
+}
+</script>
+{% endblock %}

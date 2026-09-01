@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% block body %}
+<h1>自选池</h1>
+
+<div class="card">
+  <div class="row">
+    <div class="searchbox">
+      <input id="q" placeholder="搜股票加自选：代码 / 名称 / 拼音（如 gzmt）" style="width:100%"
+             autocomplete="off" oninput="onSearch()">
+      <div class="results" id="results" style="display:none"></div>
+    </div>
+    <span class="muted">名录 {{ universe.count }} 支</span>
+  </div>
+</div>
+
+<div class="card">
+  {% if watch %}
+  <table>
+    <thead><tr><th>代码</th><th>名称</th><th>行业</th><th>最新结论</th><th>置信</th><th>更新</th><th></th></tr></thead>
+    <tbody>
+    {% for w in watch %}
+      <tr>
+        <td><a href="/stock/{{ w.code }}">{{ w.code }}</a></td>
+        <td>{{ w.name or '-' }}</td>
+        <td class="muted">{{ w.industry or '-' }}</td>
+        <td>{% if w.last_action %}<span class="tag {{ w.last_action }}">{{ w.last_action }}</span>{% else %}<span class="muted">未分析</span>{% endif %}</td>
+        <td>{{ '%.0f%%'|format(w.last_confidence*100) if w.last_confidence is not none else '-' }}</td>
+        <td class="muted">{{ w.last_at or '-' }}</td>
+        <td class="row">
+          <button onclick="study('{{ w.code }}')">分析</button>
+          <a class="btn ghost" href="/stock/{{ w.code }}">报告</a>
+          <button class="ghost" onclick="rm('{{ w.code }}')">移除</button>
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">自选池为空，上面搜索添加。</p>
+  {% endif %}
+</div>
+{% endblock %}
+
+{% block script %}
+<script>
+let timer=null;
+function onSearch(){
+  clearTimeout(timer);
+  timer=setTimeout(async()=>{
+    const q=document.getElementById('q').value.trim();
+    const box=document.getElementById('results');
+    if(!q){box.style.display='none';return;}
+    const r=await fetch('/api/search?q='+encodeURIComponent(q));
+    const rows=await r.json();
+    if(!rows.length){box.style.display='none';return;}
+    box.innerHTML=rows.map(s=>`<div onclick="add('${s.code}')">${s.code} · ${s.name||''} <span class="muted">${s.industry||''}</span></div>`).join('');
+    box.style.display='block';
+  },250);
+}
+async function add(code){
+  await fetch('/api/watch/'+code,{method:'POST'});
+  toast('已加入 '+code); location.reload();
+}
+async function rm(code){
+  if(!confirm('移除 '+code+'?'))return;
+  await fetch('/api/watch/'+code,{method:'DELETE'});
+  location.reload();
+}
+async function study(code){
+  toast('开始分析 '+code+'…');
+  const r=await fetch('/api/study/'+code,{method:'POST'});
+  const {job_id}=await r.json();
+  pollJob(job_id,(err,j)=>{
+    if(err){toast('分析失败：'+err);}
+    else{toast('分析完成 '+code+'：'+j.result.advice);setTimeout(()=>location.reload(),1200);}
+  });
+}
+</script>
+{% endblock %}

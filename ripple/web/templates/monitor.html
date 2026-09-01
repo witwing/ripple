@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block body %}
+<h1>监控</h1>
+
+<div class="card">
+  <div class="row">
+    <button onclick="scan()">立即扫描一次</button>
+    <span class="muted">
+      飞书推送：{{ '已配置' if cfg.feishu_webhook_set else '未配置（config.yaml → monitor.feishu_webhook）' }}
+      · 去重 {{ cfg.dedup_days }} 天
+    </span>
+  </div>
+</div>
+
+<h2>触发规则</h2>
+<div class="card">
+  <table>
+    <tbody>
+      <tr><td>估值到位</td><td class="muted">PE/PB 进 5Y {{ cfg.rules.get('valuation_pct_threshold',20) }}% 低分位</td>
+          <td>{{ '开' if cfg.rules.get('valuation_low_enabled',True) else '关' }}</td></tr>
+      <tr><td>动作升级</td><td class="muted">结论升级且买入置信度 ≥ {{ '%.0f%%'|format(cfg.rules.get('action_min_confidence',0.6)*100) }}</td>
+          <td>{{ '开' if cfg.rules.get('action_upgrade_enabled',True) else '关' }}</td></tr>
+    </tbody>
+  </table>
+  <p class="muted" style="margin-top:10px">阈值编辑在 config.yaml（本期只读展示）。</p>
+</div>
+
+<h2>近 7 天触发</h2>
+<div class="card">
+  {% if triggers %}
+  <table>
+    <thead><tr><th>时间</th><th>股票</th><th>规则</th><th>原因</th></tr></thead>
+    <tbody>
+    {% for t in triggers %}
+      <tr>
+        <td class="muted">{{ t.at }}</td>
+        <td><a href="/stock/{{ t.code }}">{{ t.name or t.code }}</a></td>
+        <td><span class="tag">{{ t.rule }}</span></td>
+        <td>{{ t.reason }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<p class="muted">近 7 天无触发。</p>{% endif %}
+</div>
+{% endblock %}
+
+{% block script %}
+<script>
+async function scan(){
+  toast('扫描中…（可能要几十秒）');
+  const r=await fetch('/api/scan?notify=false',{method:'POST'});
+  const {job_id}=await r.json();
+  pollJob(job_id,(err,j)=>{
+    if(err){toast('扫描失败：'+err);}
+    else{toast(`扫了 ${j.result.scanned} 支，命中 ${j.result.hits}`);setTimeout(()=>location.reload(),1500);}
+  });
+}
+</script>
+{% endblock %}

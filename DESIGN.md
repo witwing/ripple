@@ -27,6 +27,7 @@
 | v0.13 | 2026-09-01 | 图表可读性优化（面向非专业用户）：顶部动作横幅+一句话结论；信号灯配"好/一般/当心"图例+每维大白话；分位条标"便宜←→贵"+"比历史X%的时候贵"；四维评分写清每维看什么；同行散点标轴向+"右下=又便宜又能赚"；走势直接标"跑赢/跑输大盘X%" |
 | v0.14 | 2026-09-01 | 输出目录重构：按股票归档 `reports/<code>/<时间戳>.{md,png}` + `latest.{md,png}` 永远指向最新；study 打印绝对路径；新增 `ripple report path/open/list`（秒开最新报告、看历史） |
 | v0.15 | 2026-09-01 | M5 自动跟踪：monitor 模块（rules 触发规则 估值到位+动作升级 / scan 批量扫描+去重 / notify 飞书推送）；trigger_log 表去重（同 code+规则 N 天一次）；`ripple scan [--notify] [--no-llm]` + `ripple scan-cron`（生成工作日盘后 crontab）；每日汇总 + 强信号标注 |
+| v0.16 | 2026-09-01 | M6 Web 层：service 层（纯函数返回 dict，CLI+API 共用）→ FastAPI JSON API（稳定契约）→ Jinja 轻量页面；后台任务 + 轮询；4 页（自选/个股/组合/监控）；`ripple serve`。为未来换前端预留，见 §16 |
 
 ---
 
@@ -609,6 +610,53 @@ class Symbol:
 - `8xxxxx / 4xxxxx / 9xxxxx` → BJ，BSE
 
 未识别代码 → `ValueError`，业务层不吃哑巴亏。
+
+---
+
+## 16. Web 层架构（M6）
+
+**目标**：给系统一个"网页能点、方便管理任务和看数据"的轻量入口，同时**不锁死未来**——以后想换 React/移动端，后端零改动。
+
+### 16.1 分层（关键：service 层解耦）
+
+```
+┌──────────────┬──────────────┐
+│  CLI (Typer) │  Web 页面(Jinja) │   ← 两个入口，薄
+├──────────────┴──────────────┤
+│  JSON API (FastAPI)          │   ← 对外稳定契约，未来 SPA/移动端直接接
+├─────────────────────────────┤
+│  service.py（纯函数，返回 dict）│   ← 唯一业务入口，框架无关
+├─────────────────────────────┤
+│  analyze / simulate / monitor / notes / providers （现有核心，不动）│
+└─────────────────────────────┘
+```
+
+- **service 层**：把现有能力包成"输入基本类型、输出 dict/list"的纯函数（不依赖 typer/fastapi）。CLI 和 API 都调它，保证行为一致、便于测试。
+- **JSON API**：REST 风格，稳定。页面和未来任何前端都走它。
+- **Jinja 页面**：本期用服务端渲染 + 少量原生 JS，零构建。将来可整体替换为 SPA，API 不变。
+
+### 16.2 后台任务
+
+`study` / `scan` 耗时（拉数据 + LLM 几十秒），不能卡请求：
+- `POST /api/study` → 立即返回 `job_id`
+- 后台线程跑，状态写内存表（pending/running/done/error + 结果）
+- `GET /api/jobs/<id>` 轮询进度；页面用 JS 轮询
+- v1 用进程内线程池（单机够用）；将来量大可换 Celery/RQ，API 不变
+
+### 16.3 页面（本期 4 个）
+
+| 路由 | 内容 |
+|---|---|
+| `/` | 自选池列表（现价/结论/评分）+ 搜索加自选 + 每行「分析/报告/移除」 |
+| `/stock/<code>` | 最新仪表盘图 + 判断精炼 + 历史报告 + 重新分析 |
+| `/portfolio` | 持仓/净值/收益 + 买卖表单 + 流水 |
+| `/monitor` | 触发命中列表 + 规则开关阈值 + 立即扫描 |
+
+### 16.4 依赖与命令
+
+- 新增依赖：`fastapi` `uvicorn[standard]` `jinja2`（放 optional-dependencies 的 `web`）
+- 启动：`ripple serve [--port 8000] [--host 127.0.0.1]`
+- 边界：不做登录/多用户/WebSocket/前端打包（本地单机，刷新即可）
 
 ---
 

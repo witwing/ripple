@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% block body %}
+<h1>模拟组合</h1>
+
+{% if not pf %}
+<div class="card">
+  <p class="muted">还没有组合。</p>
+  <button onclick="initPf()">创建组合（初始 100 万）</button>
+</div>
+{% else %}
+<div class="card">
+  <div class="row" style="gap:32px">
+    <div><div class="muted">净值</div><div style="font-size:22px;font-weight:700">{{ '%.2f'|format(pf.nav) }}</div></div>
+    <div><div class="muted">现金</div><div style="font-size:18px">{{ '%.2f'|format(pf.cash) }}</div></div>
+    <div><div class="muted">持仓市值</div><div style="font-size:18px">{{ '%.2f'|format(pf.holdings_value) }}</div></div>
+    <div><div class="muted">总收益</div>
+      <div style="font-size:18px" class="{{ 'pos' if (pf.total_return_pct or 0)>=0 else 'neg' }}">
+        {{ '%+.2f%%'|format(pf.total_return_pct) if pf.total_return_pct is not none else '-' }}</div></div>
+  </div>
+</div>
+
+<h2>持仓</h2>
+<div class="card">
+  {% if pf.holdings %}
+  <table>
+    <thead><tr><th>代码</th><th>股数</th><th>成本</th><th>现价</th><th>市值</th><th>浮盈</th></tr></thead>
+    <tbody>
+    {% for h in pf.holdings %}
+      <tr>
+        <td><a href="/stock/{{ h.code }}">{{ h.code }}</a></td>
+        <td>{{ h.qty }}</td><td>{{ '%.3f'|format(h.avg_cost) }}</td>
+        <td>{{ '%.2f'|format(h.last_price) if h.last_price else '-' }}</td>
+        <td>{{ '%.0f'|format(h.market_value) }}</td>
+        <td class="{{ 'pos' if (h.unrealized_pnl or 0)>=0 else 'neg' }}">
+          {{ '%+.0f (%+.1f%%)'|format(h.unrealized_pnl, h.unrealized_pct) if h.unrealized_pnl is not none else '-' }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<p class="muted">空仓。</p>{% endif %}
+</div>
+
+<h2>下单</h2>
+<div class="card">
+  <div class="row">
+    <input id="code" placeholder="代码" style="width:110px">
+    <input id="qty" placeholder="股数(100整数倍)" style="width:150px">
+    <input id="price" placeholder="价格(留空用现价)" style="width:150px">
+    <button onclick="trade('buy')">买入</button>
+    <button class="ghost" onclick="trade('sell')">卖出</button>
+  </div>
+</div>
+
+<h2>成交流水</h2>
+<div class="card">
+  {% if trades %}
+  <table>
+    <thead><tr><th>时间</th><th>方向</th><th>代码</th><th>价</th><th>量</th><th>费</th><th>已实现</th></tr></thead>
+    <tbody>
+    {% for t in trades %}
+      <tr>
+        <td>{{ t.ts }}</td>
+        <td><span class="tag {{ t.side }}">{{ '买' if t.side=='buy' else '卖' }}</span></td>
+        <td>{{ t.code }}</td><td>{{ '%.2f'|format(t.price) }}</td><td>{{ t.qty }}</td>
+        <td>{{ '%.2f'|format(t.fee) }}</td>
+        <td class="{{ 'pos' if (t.realized_pnl or 0)>=0 else 'neg' }}">{{ '%+.2f'|format(t.realized_pnl) if t.realized_pnl is not none else '-' }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<p class="muted">暂无成交。</p>{% endif %}
+</div>
+{% endif %}
+{% endblock %}
+
+{% block script %}
+<script>
+async function initPf(){await fetch('/api/portfolio/init',{method:'POST'});location.reload();}
+async function trade(side){
+  const code=document.getElementById('code').value.trim();
+  const qty=document.getElementById('qty').value.trim();
+  const price=document.getElementById('price').value.trim();
+  if(!code||!qty){toast('填代码和股数');return;}
+  let url=`/api/portfolio/${side}?code=${code}&qty=${qty}`;
+  if(price)url+=`&price=${price}`;
+  const r=await fetch(url,{method:'POST'});
+  if(r.ok){toast('成交');setTimeout(()=>location.reload(),800);}
+  else{const e=await r.json();toast('失败：'+(e.detail||''));}
+}
+</script>
+{% endblock %}
